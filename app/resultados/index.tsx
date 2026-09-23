@@ -160,15 +160,26 @@ export default function ResultadosScreen() {
 
         const response = await api.get("/products", {
           params: requestParams,
+          headers: {
+            Accept: "application/json",
+          },
         });
 
         if (Array.isArray(response.data)) {
           setProducts(response.data);
+        } else if (Array.isArray(response.data?.products)) {
+          setProducts(response.data.products);
+        } else if (Array.isArray(response.data?.data)) {
+          setProducts(response.data.data);
         } else {
           setProducts([]);
         }
-      } catch (error) {
-        console.error("Erro ao buscar produtos:", error);
+      } catch (error: any) {
+        console.error(
+          "Erro ao buscar produtos:",
+          error?.response?.data || error
+        );
+
         setProducts([]);
       } finally {
         setLoading(false);
@@ -236,7 +247,6 @@ export default function ResultadosScreen() {
   const applyFilters = () => {
     setSelectedCategory(tempCategory);
     setSelectedCondition(tempCondition);
-
     setFiltersVisible(false);
 
     fetchProducts(
@@ -284,15 +294,27 @@ export default function ResultadosScreen() {
      URL DA IMAGEM
   ========================================================== */
 
-  const getImageUrl = (imagePath?: string) => {
+  const getImageUrl = (imagePath?: string | null) => {
     if (!imagePath) {
       return null;
     }
 
-    return `${api.defaults.baseURL?.replace(
-      "/api",
-      ""
-    )}/storage/${imagePath}`;
+    if (
+      imagePath.startsWith("http://") ||
+      imagePath.startsWith("https://")
+    ) {
+      return imagePath;
+    }
+
+    const baseUrl =
+      api.defaults.baseURL?.replace(/\/api\/?$/, "") ||
+      "http://127.0.0.1:8000";
+
+    const normalizedPath = imagePath
+      .replace(/^\/+/, "")
+      .replace(/^storage\/+/, "");
+
+    return `${baseUrl}/storage/${normalizedPath}`;
   };
 
   /* ==========================================================
@@ -434,10 +456,7 @@ export default function ResultadosScreen() {
 
   return (
     <View style={styles.container}>
-
-      {/* ======================================================
-          HEADER
-      ====================================================== */}
+      {/* HEADER */}
 
       <View style={styles.header}>
         <TouchableOpacity
@@ -469,61 +488,52 @@ export default function ResultadosScreen() {
         </View>
       </View>
 
-      {/* ======================================================
-          ÁREA PRINCIPAL
-      ====================================================== */}
+      {/* ÁREA PRINCIPAL */}
 
       <View style={styles.content}>
+        {/* BARRA DE PESQUISA */}
 
-        {/* ====================================================
-            BARRA DE PESQUISA
-        ==================================================== */}
+        <View style={styles.searchContainer}>
+          <TextInput
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            onSubmitEditing={handleSearch}
+            placeholder="Buscar peças, marcas..."
+            placeholderTextColor="#98A3AA"
+            style={styles.searchInput}
+            returnKeyType="search"
+            autoCorrect={false}
+            autoCapitalize="none"
+          />
 
-        
+          {searchQuery.length > 0 && (
+            <TouchableOpacity
+              onPress={clearSearch}
+              style={styles.clearSearchButton}
+              activeOpacity={0.7}
+            >
+              <Feather
+                name="x"
+                size={17}
+                color="#8A959D"
+              />
+            </TouchableOpacity>
+          )}
 
-          <View style={styles.searchContainer}>
-  <TextInput
-    value={searchQuery}
-    onChangeText={setSearchQuery}
-    onSubmitEditing={handleSearch}
-    placeholder="Buscar peças, marcas..."
-    placeholderTextColor="#98A3AA"
-    style={styles.searchInput}
-    returnKeyType="search"
-    autoCorrect={false}
-    autoCapitalize="none"
-  />
+          <TouchableOpacity
+            onPress={handleSearch}
+            style={styles.searchButton}
+            activeOpacity={0.8}
+          >
+            <Feather
+              name="search"
+              size={18}
+              color="#FFFFFF"
+            />
+          </TouchableOpacity>
+        </View>
 
-  {searchQuery.length > 0 && (
-    <TouchableOpacity
-      onPress={clearSearch}
-      style={styles.clearSearchButton}
-      activeOpacity={0.7}
-    >
-      <Feather
-        name="x"
-        size={17}
-        color="#8A959D"
-      />
-    </TouchableOpacity>
-  )}
-
-  <TouchableOpacity
-    onPress={handleSearch}
-    style={styles.searchButton}
-    activeOpacity={0.8}
-  >
-    <Feather
-      name="search"
-      size={18}
-      color="#FFFFFF"
-    />
-  </TouchableOpacity>
-</View>
-
-        {/* ====================================================
-            CONTROLES
-        ==================================================== */}
+        {/* CONTROLES */}
 
         <View style={styles.controlRow}>
           <View>
@@ -575,9 +585,7 @@ export default function ResultadosScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* ====================================================
-            FILTROS ATIVOS
-        ==================================================== */}
+        {/* FILTROS ATIVOS */}
 
         {(selectedCategoryName ||
           selectedConditionName) && (
@@ -668,9 +676,7 @@ export default function ResultadosScreen() {
           </ScrollView>
         )}
 
-        {/* ====================================================
-            RESULTADOS
-        ==================================================== */}
+        {/* RESULTADOS */}
 
         {loading ? (
           <View style={styles.loadingContainer}>
@@ -775,9 +781,7 @@ export default function ResultadosScreen() {
         )}
       </View>
 
-      {/* ======================================================
-          MODAL DE FILTROS
-      ====================================================== */}
+      {/* MODAL DE FILTROS */}
 
       <Modal
         visible={filtersVisible}
@@ -788,7 +792,6 @@ export default function ResultadosScreen() {
         }
       >
         <View style={styles.modalOverlay}>
-
           <Pressable
             style={styles.modalBackdrop}
             onPress={() =>
@@ -797,12 +800,7 @@ export default function ResultadosScreen() {
           />
 
           <View style={styles.modalContainer}>
-
-            {/* HANDLE */}
-
             <View style={styles.modalHandle} />
-
-            {/* CABEÇALHO */}
 
             <View style={styles.modalHeader}>
               <View>
@@ -836,10 +834,7 @@ export default function ResultadosScreen() {
                 styles.modalContent
               }
             >
-
-              {/* ==================================================
-                  CATEGORIA
-              ================================================== */}
+              {/* CATEGORIA */}
 
               <View style={styles.modalSection}>
                 <View style={styles.modalSectionHeader}>
@@ -919,9 +914,7 @@ export default function ResultadosScreen() {
                 </View>
               </View>
 
-              {/* ==================================================
-                  CONDIÇÃO
-              ================================================== */}
+              {/* CONDIÇÃO */}
 
               <View style={styles.modalSection}>
                 <View style={styles.modalSectionHeader}>
@@ -1006,9 +999,7 @@ export default function ResultadosScreen() {
               </View>
             </ScrollView>
 
-            {/* ==================================================
-                RODAPÉ DO MODAL
-            ================================================== */}
+            {/* RODAPÉ DO MODAL */}
 
             <View style={styles.modalFooter}>
               <TouchableOpacity
@@ -1065,10 +1056,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  /* ==========================================================
-     HEADER
-  ========================================================== */
-
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -1107,10 +1094,6 @@ const styles = StyleSheet.create({
     color: "#8A959D",
     marginTop: 2,
   },
-
-  /* ==========================================================
-     BUSCA
-  ========================================================== */
 
   searchContainer: {
     height: 50,
@@ -1152,10 +1135,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-
-  /* ==========================================================
-     CONTROLES
-  ========================================================== */
 
   controlRow: {
     flexDirection: "row",
@@ -1220,10 +1199,6 @@ const styles = StyleSheet.create({
     color: "#005386",
   },
 
-  /* ==========================================================
-     FILTROS ATIVOS
-  ========================================================== */
-
   activeFiltersContainer: {
     paddingHorizontal: 20,
     paddingTop: 4,
@@ -1260,10 +1235,6 @@ const styles = StyleSheet.create({
     color: "#7B858B",
   },
 
-  /* ==========================================================
-     RESULTADOS
-  ========================================================== */
-
   resultsHeader: {
     paddingTop: 5,
     marginBottom: 5,
@@ -1287,10 +1258,6 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     paddingBottom: 30,
   },
-
-  /* ==========================================================
-     CARD
-  ========================================================== */
 
   productCard: {
     flexDirection: "row",
@@ -1395,10 +1362,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
 
-  /* ==========================================================
-     LOADING
-  ========================================================== */
-
   loadingContainer: {
     flex: 1,
     alignItems: "center",
@@ -1428,10 +1391,6 @@ const styles = StyleSheet.create({
     color: "#8A959D",
     marginTop: 4,
   },
-
-  /* ==========================================================
-     VAZIO
-  ========================================================== */
 
   emptyContainer: {
     flexGrow: 1,
@@ -1489,10 +1448,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: "#FFFFFF",
   },
-
-  /* ==========================================================
-     MODAL
-  ========================================================== */
 
   modalOverlay: {
     flex: 1,
@@ -1560,10 +1515,6 @@ const styles = StyleSheet.create({
     paddingBottom: 25,
   },
 
-  /* ==========================================================
-     SEÇÕES DO MODAL
-  ========================================================== */
-
   modalSection: {
     marginBottom: 25,
   },
@@ -1596,10 +1547,6 @@ const styles = StyleSheet.create({
     color: "#8A959D",
     marginTop: 2,
   },
-
-  /* ==========================================================
-     OPÇÕES DE CATEGORIA
-  ========================================================== */
 
   optionsGrid: {
     flexDirection: "row",
@@ -1647,10 +1594,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginLeft: 8,
   },
-
-  /* ==========================================================
-     CONDIÇÕES
-  ========================================================== */
 
   conditionOptions: {
     gap: 8,
@@ -1704,10 +1647,6 @@ const styles = StyleSheet.create({
     fontFamily: "Montserrat_700Bold",
     color: "#005386",
   },
-
-  /* ==========================================================
-     FOOTER DO MODAL
-  ========================================================== */
 
   modalFooter: {
     flexDirection: "row",

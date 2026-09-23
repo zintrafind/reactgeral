@@ -19,11 +19,10 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import api from "../../services/api";
 
 const { width } = Dimensions.get("window");
 const itemWidth = (width - 44) / 2;
-
-const API_URL = "http://127.0.0.1:8000";
 
 /* ================================================================
    TIPAGEM DO PRODUTO
@@ -37,17 +36,14 @@ interface Produto {
   ds_produto?: string | null;
   st_condicao?: string;
   st_status?: string;
-
   categoria?: {
     nm_categoria?: string;
     ds_categoria?: string;
     nome?: string;
   };
-
   images?: {
     ds_imagem: string;
   }[];
-
   imagem?: {
     ds_imagem: string;
   };
@@ -74,28 +70,31 @@ type TabType = "anuncios" | "trocados";
 
 export default function VisualizarPerfilScreen() {
   const router = useRouter();
-
   const { id } = useLocalSearchParams();
 
   /* ==============================================================
      USUÁRIO
   ============================================================== */
 
-  const [user, setUser] = useState<UserProfileData>({
-    id_usuario: undefined,
-    name: "",
-    description: "",
-    rating: "5.0",
-    fotoPerfil: null,
-    banner: null,
-  });
+  const [user, setUser] =
+    useState<UserProfileData>({
+      id_usuario: undefined,
+      name: "",
+      description: "",
+      rating: "5.0",
+      fotoPerfil: null,
+      banner: null,
+    });
 
   /* ==============================================================
      PRODUTOS
   ============================================================== */
 
-  const [userProducts, setUserProducts] = useState<Produto[]>([]);
-  const [loadingProducts, setLoadingProducts] = useState(true);
+  const [userProducts, setUserProducts] =
+    useState<Produto[]>([]);
+
+  const [loadingProducts, setLoadingProducts] =
+    useState(true);
 
   /* ==============================================================
      ABA
@@ -108,7 +107,8 @@ export default function VisualizarPerfilScreen() {
      BLOQUEIO
   ============================================================== */
 
-  const [bloqueando, setBloqueando] = useState(false);
+  const [bloqueando, setBloqueando] =
+    useState(false);
 
   /* ==============================================================
      CARREGAR PERFIL
@@ -124,31 +124,21 @@ export default function VisualizarPerfilScreen() {
         const token =
           await AsyncStorage.getItem("token");
 
-        const response = await fetch(
-          `${API_URL}/api/users/${id}`,
+        const response = await api.get(
+          `/users/${id}`,
           {
-            method: "GET",
             headers: {
               Accept: "application/json",
-
               ...(token
                 ? {
-                    Authorization:
-                      `Bearer ${token}`,
+                    Authorization: `Bearer ${token}`,
                   }
                 : {}),
             },
           }
         );
 
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(
-            data?.message ||
-              "Não foi possível carregar o perfil."
-          );
-        }
+        const data = response.data;
 
         const usuario =
           data?.user ||
@@ -197,7 +187,7 @@ export default function VisualizarPerfilScreen() {
             usuario?.banner ||
             null,
         });
-      } catch (error) {
+      } catch (error: any) {
         console.error(
           "ERRO AO CARREGAR PERFIL:",
           error
@@ -224,29 +214,21 @@ export default function VisualizarPerfilScreen() {
         const token =
           await AsyncStorage.getItem("token");
 
-        const response = await fetch(
-          `${API_URL}/api/users/${id}/products`,
+        const response = await api.get(
+          `/users/${id}/products`,
           {
-            method: "GET",
             headers: {
               Accept: "application/json",
-
               ...(token
                 ? {
-                    Authorization:
-                      `Bearer ${token}`,
+                    Authorization: `Bearer ${token}`,
                   }
                 : {}),
             },
           }
         );
 
-        if (!response.ok) {
-          setUserProducts([]);
-          return;
-        }
-
-        const data = await response.json();
+        const data = response.data;
 
         const produtos =
           Array.isArray(data)
@@ -280,7 +262,7 @@ export default function VisualizarPerfilScreen() {
     const idUsuarioBloqueado = Number(
       user.id_usuario || id
     );
-  
+
     if (!idUsuarioBloqueado) {
       Alert.alert(
         "Erro",
@@ -288,24 +270,24 @@ export default function VisualizarPerfilScreen() {
       );
       return;
     }
-  
+
     console.log(
       "USUÁRIO QUE SERÁ BLOQUEADO:",
       idUsuarioBloqueado
     );
-  
+
     if (Platform.OS === "web") {
       const confirmou = window.confirm(
         `Tem certeza que deseja bloquear ${user.name}?`
       );
-  
+
       if (confirmou) {
         confirmarBloqueio();
       }
-  
+
       return;
     }
-  
+
     Alert.alert(
       "Bloquear usuário",
       `Tem certeza que deseja bloquear ${user.name}?`,
@@ -359,36 +341,27 @@ export default function VisualizarPerfilScreen() {
         idUsuarioBloqueado
       );
 
-      const response = await fetch(
-        `${API_URL}/api/bloqueios`,
+      const response = await api.post(
+        "/bloqueios",
         {
-          method: "POST",
+          id_usuario_bloqueado:
+            idUsuarioBloqueado,
+        },
+        {
           headers: {
             Accept: "application/json",
-            "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({
-            id_usuario_bloqueado:
-              idUsuarioBloqueado,
-          }),
         }
       );
 
-      const data = await response.json();
+      const data = response.data;
 
       console.log(
         "RESPOSTA BLOQUEIO:",
         response.status,
         data
       );
-
-      if (!response.ok) {
-        throw new Error(
-          data?.message ||
-            "Não foi possível bloquear este usuário."
-        );
-      }
 
       Alert.alert(
         "Sucesso",
@@ -407,18 +380,18 @@ export default function VisualizarPerfilScreen() {
           },
         ]
       );
-    } catch (error) {
+    } catch (error: any) {
       console.error(
         "ERRO AO BLOQUEAR USUÁRIO:",
         error
       );
 
-      Alert.alert(
-        "Erro",
-        error instanceof Error
-          ? error.message
-          : "Não foi possível bloquear este usuário."
-      );
+      const mensagem =
+        error?.response?.data?.message ||
+        error?.message ||
+        "Não foi possível bloquear este usuário.";
+
+      Alert.alert("Erro", mensagem);
     } finally {
       setBloqueando(false);
     }
@@ -430,7 +403,7 @@ export default function VisualizarPerfilScreen() {
 
   const getImageUrl = (
     imagePath?: string | null
-  ) => {
+  ): string | null => {
     if (!imagePath) {
       return null;
     }
@@ -448,11 +421,18 @@ export default function VisualizarPerfilScreen() {
       return path;
     }
 
+    const baseUrl =
+      api.defaults.baseURL?.replace(
+        /\/api\/?$/,
+        ""
+      ) ||
+      "http://127.0.0.1:8000";
+
     const cleanPath = path
       .replace(/^\/+/, "")
-      .replace(/^storage\//, "");
+      .replace(/^storage\/+/, "");
 
-    return `${API_URL}/storage/${cleanPath}`;
+    return `${baseUrl}/storage/${cleanPath}`;
   };
 
   /* ==============================================================
@@ -472,10 +452,9 @@ export default function VisualizarPerfilScreen() {
   const getConditionLabel = (
     condition: any
   ) => {
-    const valor =
-      String(condition || "")
-        .trim()
-        .toUpperCase();
+    const valor = String(condition || "")
+      .trim()
+      .toUpperCase();
 
     switch (valor) {
       case "N":
@@ -506,10 +485,9 @@ export default function VisualizarPerfilScreen() {
 
   const anunciosCount =
     userProducts.filter((item) => {
-      const status =
-        String(
-          item?.st_status || ""
-        ).toUpperCase();
+      const status = String(
+        item?.st_status || ""
+      ).toUpperCase();
 
       return (
         status === "A" ||
@@ -538,10 +516,9 @@ export default function VisualizarPerfilScreen() {
             ).toUpperCase() === "T"
         )
       : userProducts.filter((item) => {
-          const status =
-            String(
-              item?.st_status || ""
-            ).toUpperCase();
+          const status = String(
+            item?.st_status || ""
+          ).toUpperCase();
 
           return (
             status === "A" ||
@@ -563,10 +540,9 @@ export default function VisualizarPerfilScreen() {
       return;
     }
 
-    const status =
-      String(
-        produto?.st_status || ""
-      ).toUpperCase();
+    const status = String(
+      produto?.st_status || ""
+    ).toUpperCase();
 
     if (status === "T") {
       return;
@@ -599,14 +575,9 @@ export default function VisualizarPerfilScreen() {
     >
       <StatusBar style="dark" />
 
-      {/* ======================================================
-          HEADER
-      ====================================================== */}
-
+      {/* HEADER */}
       <View style={styles.header}>
-
         {/* BOTÃO VOLTAR */}
-
         <TouchableOpacity
           onPress={() => {
             if (router.canGoBack()) {
@@ -626,13 +597,11 @@ export default function VisualizarPerfilScreen() {
         </TouchableOpacity>
 
         {/* BOTÃO BLOQUEAR */}
-
         <TouchableOpacity
           onPress={() => {
             console.log(
               "CLIQUEI NO BOTÃO DE BLOQUEAR"
             );
-
             bloquearUsuario();
           }}
           disabled={bloqueando}
@@ -645,46 +614,32 @@ export default function VisualizarPerfilScreen() {
             color="#D9534F"
           />
         </TouchableOpacity>
-
       </View>
 
-      {/* ======================================================
-          LISTA
-      ====================================================== */}
-
+      {/* LISTA */}
       <FlatList
         data={displayedProducts}
-
         keyExtractor={(item, index) =>
           String(
             item?.id_produto ||
               index
           )
         }
-
         numColumns={2}
-
         columnWrapperStyle={
           styles.gridRow
         }
-
         contentContainerStyle={
           styles.listContent
         }
-
         showsVerticalScrollIndicator={
           false
         }
 
-        /* ====================================================
-           CABEÇALHO DO PERFIL
-        ==================================================== */
-
+        /* CABEÇALHO DO PERFIL */
         ListHeaderComponent={
           <View>
-
             {/* BANNER */}
-
             <View
               style={
                 styles.bannerContainer
@@ -715,14 +670,12 @@ export default function VisualizarPerfilScreen() {
             </View>
 
             {/* INFORMAÇÕES DO USUÁRIO */}
-
             <View
               style={
                 styles.profileInfoContainer
               }
             >
               {/* FOTO */}
-
               <View
                 style={
                   styles.roundAvatar
@@ -747,7 +700,6 @@ export default function VisualizarPerfilScreen() {
               </View>
 
               {/* NOME E DESCRIÇÃO */}
-
               <View
                 style={
                   styles.userInfoTextContainer
@@ -788,7 +740,6 @@ export default function VisualizarPerfilScreen() {
             </View>
 
             {/* AVALIAÇÃO */}
-
             <View
               style={
                 styles.ratingContainer
@@ -852,14 +803,12 @@ export default function VisualizarPerfilScreen() {
             </View>
 
             {/* ABAS */}
-
             <View
               style={
                 styles.tabsContainer
               }
             >
               {/* ANÚNCIOS */}
-
               <TouchableOpacity
                 style={[
                   styles.tabItem,
@@ -887,7 +836,6 @@ export default function VisualizarPerfilScreen() {
               </TouchableOpacity>
 
               {/* TROCADOS */}
-
               <TouchableOpacity
                 style={[
                   styles.tabItem,
@@ -918,10 +866,7 @@ export default function VisualizarPerfilScreen() {
           </View>
         }
 
-        /* ====================================================
-           LISTA VAZIA
-        ==================================================== */
-
+        /* LISTA VAZIA */
         ListEmptyComponent={
           loadingProducts ? (
             <ActivityIndicator
@@ -942,10 +887,7 @@ export default function VisualizarPerfilScreen() {
           )
         }
 
-        /* ====================================================
-           CARD
-        ==================================================== */
-
+        /* CARD */
         renderItem={({
           item,
         }) => {
@@ -992,7 +934,6 @@ export default function VisualizarPerfilScreen() {
               }
             >
               {/* IMAGEM */}
-
               <View
                 style={
                   styles.imagePlaceholder
@@ -1017,7 +958,6 @@ export default function VisualizarPerfilScreen() {
               </View>
 
               {/* TEXTO */}
-
               <View
                 style={
                   styles.textPlaceholderRow

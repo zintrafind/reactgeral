@@ -81,22 +81,36 @@ export default function FavoritosScreen() {
   // MONTAR URL DA IMAGEM
   // ============================================================
 
-  const getImageUrl = (imagePath?: string | null) => {
-    if (!imagePath) {
-      return null;
-    }
+const getImageUrl = (imagePath?: string | null) => {
+  if (!imagePath) {
+    return null;
+  }
 
-    if (
-      imagePath.startsWith("http://") ||
-      imagePath.startsWith("https://")
-    ) {
-      return imagePath;
-    }
+  const path = String(imagePath).trim();
 
-    const baseUrl = api.defaults.baseURL?.replace("/api", "");
+  if (!path) {
+    return null;
+  }
 
-    return `${baseUrl}/storage/${imagePath}`;
-  };
+  if (
+    path.startsWith("http://") ||
+    path.startsWith("https://")
+  ) {
+    return path;
+  }
+
+  const baseUrl =
+    api.defaults.baseURL?.replace(
+      /\/api\/?$/,
+      ""
+    ) || "http://127.0.0.1:8000";
+
+  const cleanPath = path
+    .replace(/^\/+/, "")
+    .replace(/^storage\/+/, "");
+
+  return `${baseUrl}/storage/${cleanPath}`;
+};
 
   // ============================================================
   // CONDIÇÃO DO PRODUTO

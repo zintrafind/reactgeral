@@ -15,10 +15,9 @@ import {
 import { Feather, Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import api from "../../services/api";
 
 const { width } = Dimensions.get("window");
-
-const API_URL = "http://127.0.0.1:8000";
 
 export default function ProductDetailScreen() {
   const router = useRouter();
@@ -47,14 +46,26 @@ export default function ProductDetailScreen() {
   const getImageUrl = (imagePath?: string | null) => {
     if (!imagePath) return null;
 
+    const path = String(imagePath).trim();
+
+    if (!path) return null;
+
     if (
-      imagePath.startsWith("http://") ||
-      imagePath.startsWith("https://")
+      path.startsWith("http://") ||
+      path.startsWith("https://")
     ) {
-      return imagePath;
+      return path;
     }
 
-    return `${API_URL}/storage/${imagePath}`;
+    const baseUrl =
+      api.defaults.baseURL?.replace(/\/api\/?$/, "") ||
+      "http://127.0.0.1:8000";
+
+    const cleanPath = path
+      .replace(/^\/+/, "")
+      .replace(/^storage\/+/, "");
+
+    return `${baseUrl}/storage/${cleanPath}`;
   };
 
   // =========================================================
@@ -65,16 +76,12 @@ export default function ProductDetailScreen() {
     switch (condicao) {
       case "N":
         return "Novo";
-
       case "S":
         return "Seminovo";
-
       case "U":
         return "Usado";
-
       case "Q":
         return "Quebrado";
-
       default:
         return "Não informado";
     }
@@ -92,15 +99,18 @@ export default function ProductDetailScreen() {
     try {
       setLoading(true);
 
-      const response = await fetch(`${API_URL}/api/products/${id}`);
+      const response = await api.get(`/products/${id}`, {
+        headers: {
+          Accept: "application/json",
+        },
+      });
 
-      if (!response.ok) {
-        throw new Error("Não foi possível carregar o produto.");
-      }
+      const data = response.data;
 
-      const data = await response.json();
-
-      console.log("🔥 PRODUTO DETALHADO:", JSON.stringify(data, null, 2));
+      console.log(
+        "🔥 PRODUTO DETALHADO:",
+        JSON.stringify(data, null, 2)
+      );
 
       setProduct(data);
 
@@ -129,19 +139,14 @@ export default function ProductDetailScreen() {
         return;
       }
 
-      const response = await fetch(`${API_URL}/api/favoritos`, {
-        method: "GET",
+      const response = await api.get("/favoritos", {
         headers: {
           Accept: "application/json",
           Authorization: `Bearer ${token}`,
         },
       });
 
-      if (!response.ok) {
-        return;
-      }
-
-      const data = await response.json();
+      const data = response.data;
 
       const favoritos = Array.isArray(data)
         ? data
@@ -149,7 +154,8 @@ export default function ProductDetailScreen() {
 
       const encontrado = favoritos.some(
         (item: any) =>
-          Number(item.id_produto) === Number(produtoAtual.id_produto) ||
+          Number(item.id_produto) ===
+            Number(produtoAtual.id_produto) ||
           Number(item.produto?.id_produto) ===
             Number(produtoAtual.id_produto)
       );
@@ -183,10 +189,9 @@ export default function ProductDetailScreen() {
       setCarregandoFavorito(true);
 
       if (favoritado) {
-        const response = await fetch(
-          `${API_URL}/api/favoritos/${product.id_produto}`,
+        await api.delete(
+          `/favoritos/${product.id_produto}`,
           {
-            method: "DELETE",
             headers: {
               Accept: "application/json",
               Authorization: `Bearer ${token}`,
@@ -194,30 +199,20 @@ export default function ProductDetailScreen() {
           }
         );
 
-        if (!response.ok) {
-          throw new Error("Erro ao remover dos favoritos.");
-        }
-
         setFavoritado(false);
       } else {
-        const response = await fetch(`${API_URL}/api/favoritos`, {
-          method: "POST",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
+        await api.post(
+          "/favoritos",
+          {
             id_produto: Number(product.id_produto),
-          }),
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.log("Erro favorito:", errorText);
-
-          throw new Error("Erro ao adicionar aos favoritos.");
-        }
+          },
+          {
+            headers: {
+              Accept: "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
 
         setFavoritado(true);
       }
@@ -255,10 +250,9 @@ export default function ProductDetailScreen() {
 
       setSolicitandoTroca(true);
 
-      const meusProdutosResponse = await fetch(
-        `${API_URL}/api/my-products`,
+      const meusProdutosResponse = await api.get(
+        "/my-products",
         {
-          method: "GET",
           headers: {
             Accept: "application/json",
             Authorization: `Bearer ${token}`,
@@ -266,20 +260,7 @@ export default function ProductDetailScreen() {
         }
       );
 
-      if (!meusProdutosResponse.ok) {
-        const errorText = await meusProdutosResponse.text();
-
-        console.log(
-          "Erro ao buscar meus produtos:",
-          errorText
-        );
-
-        throw new Error(
-          "Não foi possível carregar seus produtos."
-        );
-      }
-
-      const meusProdutosData = await meusProdutosResponse.json();
+      const meusProdutosData = meusProdutosResponse.data;
 
       console.log(
         "🔥 6 - MEUS PRODUTOS:",
@@ -295,7 +276,8 @@ export default function ProductDetailScreen() {
       const produtosDisponiveis = produtos.filter(
         (item: any) =>
           item.st_status === "A" &&
-          Number(item.id_produto) !== Number(product.id_produto)
+          Number(item.id_produto) !==
+            Number(product.id_produto)
       );
 
       if (produtosDisponiveis.length === 0) {
@@ -346,31 +328,26 @@ export default function ProductDetailScreen() {
         return;
       }
 
-      const response = await fetch(`${API_URL}/api/propostas`, {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
+      const response = await api.post(
+        "/propostas",
+        {
           id_produto_desejado: Number(product.id_produto),
           id_produto_oferecido: Number(selectedProductId),
-        }),
-      });
+        },
+        {
+          headers: {
+            Accept: "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
 
-      const data = await response.json();
+      const data = response.data;
 
       console.log(
         "🔥 RESPOSTA PROPOSTA:",
         JSON.stringify(data, null, 2)
       );
-
-      if (!response.ok) {
-        throw new Error(
-          data?.message || "Não foi possível enviar a proposta."
-        );
-      }
 
       setModalVisible(false);
       setSelectedProductId(null);
@@ -386,7 +363,8 @@ export default function ProductDetailScreen() {
 
       Alert.alert(
         "Erro",
-        error?.message ||
+        error?.response?.data?.message ||
+          error?.message ||
           "Não foi possível enviar a proposta de troca."
       );
     }
@@ -473,10 +451,6 @@ export default function ProductDetailScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
-        {/* ================================================= */}
-        {/* CABEÇALHO */}
-        {/* ================================================= */}
-
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.headerButton}
@@ -520,10 +494,6 @@ export default function ProductDetailScreen() {
             )}
           </TouchableOpacity>
         </View>
-
-        {/* ================================================= */}
-        {/* IMAGENS DO PRODUTO */}
-        {/* ================================================= */}
 
         <View style={styles.imageSection}>
           {images.length > 0 ? (
@@ -611,10 +581,6 @@ export default function ProductDetailScreen() {
           )}
         </View>
 
-        {/* ================================================= */}
-        {/* INFORMAÇÕES DO PRODUTO */}
-        {/* ================================================= */}
-
         <View style={styles.productInfo}>
           <Text style={styles.productTitle}>
             {product.nm_produto}
@@ -656,10 +622,6 @@ export default function ProductDetailScreen() {
             </>
           )}
         </View>
-
-        {/* ================================================= */}
-        {/* VENDEDOR */}
-        {/* ================================================= */}
 
         {product.user && (
           <View style={styles.sellerSection}>
@@ -709,10 +671,6 @@ export default function ProductDetailScreen() {
           </View>
         )}
 
-        {/* ================================================= */}
-        {/* BOTÃO TROCA */}
-        {/* ================================================= */}
-
         <View style={styles.exchangeSection}>
           <TouchableOpacity
             style={styles.exchangeButton}
@@ -742,10 +700,6 @@ export default function ProductDetailScreen() {
         </View>
       </ScrollView>
 
-      {/* =================================================== */}
-      {/* MODAL DE SOLICITAR TROCA */}
-      {/* =================================================== */}
-
       <Modal
         animationType="slide"
         transparent={true}
@@ -755,8 +709,6 @@ export default function ProductDetailScreen() {
         }
       >
         <View style={styles.modalOverlay}>
-          {/* FUNDO CLICÁVEL */}
-
           <TouchableOpacity
             style={styles.modalBackdropTouch}
             activeOpacity={1}
@@ -765,13 +717,7 @@ export default function ProductDetailScreen() {
             }
           />
 
-          {/* CONTEÚDO */}
-
           <View style={styles.modalContent}>
-            {/* =========================================== */}
-            {/* CABEÇALHO DO MODAL */}
-            {/* =========================================== */}
-
             <View style={styles.modalHeader}>
               <TouchableOpacity
                 onPress={() =>
@@ -795,10 +741,6 @@ export default function ProductDetailScreen() {
               <View style={styles.modalHeaderSpacer} />
             </View>
 
-            {/* =========================================== */}
-            {/* LISTA */}
-            {/* =========================================== */}
-
             <FlatList
               data={meusProdutos}
               keyExtractor={(item) =>
@@ -810,10 +752,6 @@ export default function ProductDetailScreen() {
               }
               ListHeaderComponent={
                 <View>
-                  {/* ===================================== */}
-                  {/* PRODUTO DESEJADO */}
-                  {/* ===================================== */}
-
                   <View
                     style={
                       styles.targetProductCard
@@ -890,17 +828,9 @@ export default function ProductDetailScreen() {
                     </View>
                   </View>
 
-                  {/* ===================================== */}
-                  {/* DIVISÓRIA */}
-                  {/* ===================================== */}
-
                   <View
                     style={styles.modalDivider}
                   />
-
-                  {/* ===================================== */}
-                  {/* TÍTULO DOS PRODUTOS DO USUÁRIO */}
-                  {/* ===================================== */}
 
                   <Text
                     style={
@@ -942,8 +872,6 @@ export default function ProductDetailScreen() {
                       )
                     }
                   >
-                    {/* FOTO DO PRODUTO */}
-
                     <View
                       style={
                         styles.myProductImageContainer
@@ -968,8 +896,6 @@ export default function ProductDetailScreen() {
                       )}
                     </View>
 
-                    {/* INFORMAÇÕES */}
-
                     <View
                       style={styles.myProductInfo}
                     >
@@ -993,8 +919,6 @@ export default function ProductDetailScreen() {
                       </Text>
                     </View>
 
-                    {/* CHECKBOX */}
-
                     <View
                       style={[
                         styles.checkbox,
@@ -1014,10 +938,6 @@ export default function ProductDetailScreen() {
                 );
               }}
             />
-
-            {/* =========================================== */}
-            {/* RODAPÉ */}
-            {/* =========================================== */}
 
             <View
               style={
@@ -1059,33 +979,21 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#FFFFFF",
   },
-
   scrollContent: {
     paddingBottom: 30,
   },
-
-  // ===========================================================
-  // LOADING
-  // ===========================================================
-
   loadingContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "#FFFFFF",
   },
-
   loadingText: {
     marginTop: 12,
     fontFamily: "Montserrat_400Regular",
     fontSize: 14,
     color: "#777777",
   },
-
-  // ===========================================================
-  // HEADER
-  // ===========================================================
-
   header: {
     height: 62,
     flexDirection: "row",
@@ -1096,14 +1004,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#EEEEEE",
   },
-
   headerButton: {
     width: 40,
     height: 40,
     justifyContent: "center",
     alignItems: "center",
   },
-
   headerTitle: {
     flex: 1,
     textAlign: "center",
@@ -1111,17 +1017,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#005386",
   },
-
-  // ===========================================================
-  // IMAGENS
-  // ===========================================================
-
   imageSection: {
     width: "100%",
     height: width * 0.82,
     backgroundColor: "#F8F8F8",
   },
-
   imageWrapper: {
     width: width,
     height: width * 0.82,
@@ -1129,25 +1029,21 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "#F8F8F8",
   },
-
   productImage: {
     width: "100%",
     height: "100%",
   },
-
   noImageContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
   },
-
   noImageText: {
     marginTop: 8,
     fontFamily: "Montserrat_400Regular",
     fontSize: 13,
     color: "#999999",
   },
-
   pagination: {
     position: "absolute",
     bottom: 12,
@@ -1157,7 +1053,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-
   paginationDot: {
     width: 7,
     height: 7,
@@ -1165,28 +1060,20 @@ const styles = StyleSheet.create({
     backgroundColor: "#CCCCCC",
     marginHorizontal: 3,
   },
-
   paginationDotActive: {
     width: 20,
     backgroundColor: "#0099FF",
   },
-
-  // ===========================================================
-  // PRODUTO
-  // ===========================================================
-
   productInfo: {
     paddingHorizontal: 20,
     paddingTop: 20,
   },
-
   productTitle: {
     fontFamily: "Montserrat_700Bold",
     fontSize: 22,
     color: "#005386",
     marginBottom: 10,
   },
-
   categoryBadge: {
     alignSelf: "flex-start",
     backgroundColor: "#E4F8FF",
@@ -1195,54 +1082,42 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     marginBottom: 12,
   },
-
   categoryText: {
     fontFamily: "Montserrat_600SemiBold",
     fontSize: 11,
     color: "#0099FF",
   },
-
   infoRow: {
     flexDirection: "row",
     alignItems: "center",
     marginBottom: 20,
   },
-
   infoItem: {
     flexDirection: "row",
     alignItems: "center",
   },
-
   infoText: {
     marginLeft: 7,
     fontFamily: "Montserrat_500Medium",
     fontSize: 13,
     color: "#555555",
   },
-
   sectionTitle: {
     fontFamily: "Montserrat_700Bold",
     fontSize: 16,
     color: "#005386",
     marginBottom: 10,
   },
-
   description: {
     fontFamily: "Montserrat_400Regular",
     fontSize: 14,
     lineHeight: 22,
     color: "#555555",
   },
-
-  // ===========================================================
-  // VENDEDOR
-  // ===========================================================
-
   sellerSection: {
     paddingHorizontal: 20,
     marginTop: 25,
   },
-
   sellerCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -1252,7 +1127,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 12,
   },
-
   sellerImageContainer: {
     width: 48,
     height: 48,
@@ -1262,39 +1136,29 @@ const styles = StyleSheet.create({
     alignItems: "center",
     overflow: "hidden",
   },
-
   userProfileImage: {
     width: "100%",
     height: "100%",
   },
-
   sellerInfo: {
     flex: 1,
     marginLeft: 12,
   },
-
   sellerName: {
     fontFamily: "Montserrat_700Bold",
     fontSize: 14,
     color: "#005386",
   },
-
   sellerAction: {
     marginTop: 3,
     fontFamily: "Montserrat_400Regular",
     fontSize: 11,
     color: "#0099FF",
   },
-
-  // ===========================================================
-  // TROCA
-  // ===========================================================
-
   exchangeSection: {
     paddingHorizontal: 20,
     marginTop: 25,
   },
-
   exchangeButton: {
     height: 52,
     borderRadius: 10,
@@ -1303,23 +1167,16 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-
   exchangeButtonText: {
     marginLeft: 8,
     fontFamily: "Montserrat_700Bold",
     fontSize: 15,
     color: "#FFFFFF",
   },
-
-  // ===========================================================
-  // MODAL
-  // ===========================================================
-
   modalOverlay: {
     flex: 1,
     justifyContent: "flex-end",
   },
-
   modalBackdropTouch: {
     position: "absolute",
     top: 0,
@@ -1328,7 +1185,6 @@ const styles = StyleSheet.create({
     bottom: 0,
     backgroundColor: "rgba(0,0,0,0.35)",
   },
-
   modalContent: {
     width: "100%",
     maxHeight: "88%",
@@ -1337,11 +1193,6 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 22,
     overflow: "hidden",
   },
-
-  // ===========================================================
-  // HEADER MODAL
-  // ===========================================================
-
   modalHeader: {
     height: 58,
     flexDirection: "row",
@@ -1351,37 +1202,24 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#EEEEEE",
   },
-
   modalBackButton: {
     width: 30,
     height: 30,
     justifyContent: "center",
     alignItems: "center",
   },
-
   modalHeaderTitle: {
     fontFamily: "Montserrat_700Bold",
     fontSize: 16,
     color: "#005386",
   },
-
   modalHeaderSpacer: {
     width: 30,
   },
-
-  // ===========================================================
-  // LISTA DO MODAL
-  // ===========================================================
-
   modalListContent: {
     padding: 20,
     paddingBottom: 20,
   },
-
-  // ===========================================================
-  // PRODUTO DESEJADO
-  // ===========================================================
-
   targetProductCard: {
     flexDirection: "row",
     backgroundColor: "#E4F8FF",
@@ -1391,7 +1229,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#0099FF",
   },
-
   targetImageContainer: {
     width: 50,
     height: 50,
@@ -1401,59 +1238,43 @@ const styles = StyleSheet.create({
     alignItems: "center",
     overflow: "hidden",
   },
-
   targetProductImage: {
     width: "100%",
     height: "100%",
     borderRadius: 6,
   },
-
   targetInfo: {
     marginLeft: 10,
     flex: 1,
   },
-
   targetLabel: {
     fontFamily: "Montserrat_400Regular",
     fontSize: 11,
     color: "#005386",
     marginBottom: 2,
   },
-
   targetTitle: {
     fontFamily: "Montserrat_700Bold",
     fontSize: 13,
     color: "#005386",
   },
-
   targetCondition: {
     marginTop: 3,
     fontFamily: "Montserrat_400Regular",
     fontSize: 11,
     color: "#0099FF",
   },
-
-  // ===========================================================
-  // DIVISÓRIA
-  // ===========================================================
-
   modalDivider: {
     height: 1,
     backgroundColor: "#EEEEEE",
     marginVertical: 14,
   },
-
   modalSectionTitle: {
     fontSize: 14,
     fontFamily: "Montserrat_600SemiBold",
     color: "#005386",
     marginBottom: 10,
   },
-
-  // ===========================================================
-  // PRODUTOS DO USUÁRIO
-  // ===========================================================
-
   myProductCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -1464,12 +1285,10 @@ const styles = StyleSheet.create({
     borderColor: "#EEEEEE",
     marginBottom: 8,
   },
-
   myProductCardSelected: {
     borderColor: "#0099FF",
     backgroundColor: "#E4F8FF",
   },
-
   myProductImageContainer: {
     width: 50,
     height: 50,
@@ -1479,35 +1298,26 @@ const styles = StyleSheet.create({
     alignItems: "center",
     overflow: "hidden",
   },
-
   myProductImage: {
     width: "100%",
     height: "100%",
     borderRadius: 8,
   },
-
   myProductInfo: {
     marginLeft: 10,
     flex: 1,
   },
-
   myProductTitle: {
     fontFamily: "Montserrat_600SemiBold",
     fontSize: 13,
     color: "#333333",
   },
-
   myProductCondition: {
     marginTop: 4,
     fontFamily: "Montserrat_400Regular",
     fontSize: 11,
     color: "#777777",
   },
-
-  // ===========================================================
-  // CHECKBOX
-  // ===========================================================
-
   checkbox: {
     width: 20,
     height: 20,
@@ -1517,23 +1327,16 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-
   checkboxSelected: {
     backgroundColor: "#0099FF",
     borderColor: "#0099FF",
   },
-
-  // ===========================================================
-  // RODAPÉ MODAL
-  // ===========================================================
-
   modalFooterContainer: {
     padding: 16,
     borderTopWidth: 1,
     borderTopColor: "#EEEEEE",
     backgroundColor: "#FFFFFF",
   },
-
   confirmButton: {
     backgroundColor: "#0099FF",
     height: 48,
@@ -1541,11 +1344,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-
   confirmButtonDisabled: {
     backgroundColor: "#B3E5FF",
   },
-
   confirmButtonText: {
     fontFamily: "Montserrat_700Bold",
     fontSize: 14,

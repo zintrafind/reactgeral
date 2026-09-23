@@ -14,14 +14,9 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-
-import api from "../../services/api";
+import api from "../../services/api.js";
 
 const { width } = Dimensions.get("window");
-
-/* ================================================================
-   TIPAGEM DO PRODUTO
-================================================================ */
 
 interface Produto {
   id_produto: number;
@@ -31,22 +26,13 @@ interface Produto {
   ds_produto: string | null;
   st_condicao: string;
   st_status: string;
-
   user?: {
     nm_usuario: string;
   };
-
   images?: {
     ds_imagem: string;
   }[];
 }
-
-/* ================================================================
-   CATEGORIAS
-
-   Os IDs precisam corresponder aos IDs cadastrados
-   na tabela tb_categoria do banco.
-================================================================ */
 
 const categories = [
   { id: null, name: "Todos" },
@@ -61,20 +47,12 @@ const categories = [
   { id: 9, name: "Outros" },
 ];
 
-/* ================================================================
-   CONDIÇÕES DOS PRODUTOS
-================================================================ */
-
 const conditionNames: Record<string, string> = {
   N: "Novo",
   S: "Semi-novo",
   U: "Usado",
   Q: "Quebrado",
 };
-
-/* ================================================================
-   HOME
-================================================================ */
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -83,10 +61,6 @@ export default function HomeScreen() {
   const [products, setProducts] = useState<Produto[]>([]);
   const [loading, setLoading] = useState(true);
   const [profileImage, setProfileImage] = useState<string | null>(null);
-
-  /* ================================================================
-     BANNERS
-  ================================================================ */
 
   const banners = [
     {
@@ -101,24 +75,11 @@ export default function HomeScreen() {
     },
   ];
 
-  /* ================================================================
-     CARREGAR PRODUTOS
-
-     A Home continua consumindo a API existente:
-     GET /products
-  ================================================================ */
-
   const fetchProducts = async () => {
     try {
       setLoading(true);
 
       const response = await api.get("/products");
-
-      /*
-       * Mantemos o formato atual da API.
-       * Caso a API retorne diretamente um array,
-       * ele será utilizado normalmente.
-       */
 
       if (Array.isArray(response.data)) {
         setProducts(response.data);
@@ -128,40 +89,23 @@ export default function HomeScreen() {
         setProducts([]);
       }
     } catch (error) {
-      console.error(
-        "Erro ao carregar produtos da Home:",
-        error
-      );
-
+      console.error("Erro ao carregar produtos da Home:", error);
       setProducts([]);
     } finally {
       setLoading(false);
     }
   };
 
-  /* ================================================================
-     CARREGAR FOTO DE PERFIL
-  ================================================================ */
-
   const loadProfileImage = async () => {
     try {
-      let storedUser =
-        await AsyncStorage.getItem("usuario");
+      let storedUser = await AsyncStorage.getItem("usuario");
 
-      console.log(
-        "USUARIO DO STORAGE:",
-        storedUser
-      );
+      console.log("USUARIO DO STORAGE:", storedUser);
 
-      // Se ainda não encontrou o usuário,
-      // espera um pouco e tenta novamente
       if (!storedUser) {
-        await new Promise((resolve) =>
-          setTimeout(resolve, 500)
-        );
+        await new Promise((resolve) => setTimeout(resolve, 500));
 
-        storedUser =
-          await AsyncStorage.getItem("usuario");
+        storedUser = await AsyncStorage.getItem("usuario");
 
         console.log(
           "USUARIO DO STORAGE - SEGUNDA TENTATIVA:",
@@ -170,26 +114,17 @@ export default function HomeScreen() {
       }
 
       if (!storedUser) {
-        console.log(
-          "USUÁRIO AINDA NÃO ENCONTRADO NO STORAGE"
-        );
-
+        console.log("USUÁRIO AINDA NÃO ENCONTRADO NO STORAGE");
         setProfileImage(null);
         return;
       }
 
       const user = JSON.parse(storedUser);
 
-      console.log(
-        "USUARIO PARSEADO:",
-        user
-      );
+      console.log("USUARIO PARSEADO:", user);
 
       if (!user?.id_usuario) {
-        console.log(
-          "ID DO USUÁRIO NÃO ENCONTRADO"
-        );
-
+        console.log("ID DO USUÁRIO NÃO ENCONTRADO");
         setProfileImage(null);
         return;
       }
@@ -203,14 +138,10 @@ export default function HomeScreen() {
         `/users/${user.id_usuario}`
       );
 
-      console.log(
-        "USUARIO RECEBIDO DA API:",
-        response.data
-      );
+      console.log("USUARIO RECEBIDO DA API:", response.data);
 
       const updatedUser =
-        response.data?.user ||
-        response.data;
+        response.data?.user || response.data;
 
       console.log(
         "CAMINHO DA FOTO:",
@@ -218,10 +149,7 @@ export default function HomeScreen() {
       );
 
       if (!updatedUser?.ds_foto_perfil) {
-        console.log(
-          "USUÁRIO NÃO POSSUI FOTO"
-        );
-
+        console.log("USUÁRIO NÃO POSSUI FOTO");
         setProfileImage(null);
         return;
       }
@@ -230,22 +158,17 @@ export default function HomeScreen() {
         updatedUser.ds_foto_perfil
       )
         .replace(/^\/+/, "")
-        .replace(/^storage\//, "");
+        .replace(/^storage\/+/, "");
 
       const baseUrl =
         api.defaults.baseURL?.replace(
           /\/api\/?$/,
           ""
-        ) ||
-        "http://127.0.0.1:8000";
+        ) || "http://127.0.0.1:8000";
 
-      const urlFoto =
-        `${baseUrl}/storage/${caminho}`;
+      const urlFoto = `${baseUrl}/storage/${caminho}`;
 
-      console.log(
-        "URL FINAL DA FOTO:",
-        urlFoto
-      );
+      console.log("URL FINAL DA FOTO:", urlFoto);
 
       setProfileImage(urlFoto);
     } catch (error) {
@@ -258,23 +181,12 @@ export default function HomeScreen() {
     }
   };
 
-  /* ================================================================
-     ATUALIZAR HOME AO VOLTAR PARA ELA
-  ================================================================ */
-
   useFocusEffect(
     useCallback(() => {
       fetchProducts();
       loadProfileImage();
     }, [])
   );
-
-  /* ================================================================
-     PESQUISA
-
-     A Home não filtra diretamente.
-     Ela envia o texto para a tela de resultados.
-  ================================================================ */
 
   const handleSearch = () => {
     const search = searchQuery.trim();
@@ -286,13 +198,6 @@ export default function HomeScreen() {
       },
     });
   };
-
-  /* ================================================================
-     CATEGORIAS / FILTRO
-
-     A categoria selecionada é enviada para a tela
-     de resultados.
-  ================================================================ */
 
   const handleCategory = (
     categoryId: number | null
@@ -308,10 +213,6 @@ export default function HomeScreen() {
     });
   };
 
-  /* ================================================================
-     URL DA IMAGEM
-  ================================================================ */
-
   const getImageUrl = (
     imagePath?: string | null
   ) => {
@@ -325,11 +226,6 @@ export default function HomeScreen() {
       return null;
     }
 
-    /*
-     * Se a API já retornar uma URL completa,
-     * não adicionamos novamente o endereço do servidor.
-     */
-
     if (
       path.startsWith("http://") ||
       path.startsWith("https://")
@@ -341,25 +237,14 @@ export default function HomeScreen() {
       api.defaults.baseURL?.replace(
         /\/api\/?$/,
         ""
-      ) ||
-      "http://127.0.0.1:8000";
-
-    /*
-     * Remove barras duplicadas e evita criar:
-     *
-     * /storage/storage/...
-     */
+      ) || "http://127.0.0.1:8000";
 
     const cleanPath = path
       .replace(/^\/+/, "")
-      .replace(/^storage\//, "");
+      .replace(/^storage\/+/, "");
 
     return `${baseUrl}/storage/${cleanPath}`;
   };
-
-  /* ================================================================
-     ABRIR ANÚNCIO
-  ================================================================ */
 
   const handleOpenProduct = (
     produto: Produto
@@ -372,40 +257,20 @@ export default function HomeScreen() {
     } as any);
   };
 
-  /* ================================================================
-     RENDER
-  ================================================================ */
-
   return (
     <View style={styles.mainContainer}>
-
-      {/* ============================================================
-          CONTEÚDO PRINCIPAL
-      ============================================================ */}
-
       <ScrollView
         style={styles.container}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-
-        {/* ============================================================
-            HEADER
-        ============================================================ */}
-
         <View style={styles.headerContainer}>
-
-          {/* LOGO */}
-
           <Image
             source={require("../../assets/images/logo.png")}
             style={styles.logo}
           />
 
-          {/* PESQUISA */}
-
           <View style={styles.searchContainer}>
-
             <TouchableOpacity
               onPress={handleSearch}
               activeOpacity={0.7}
@@ -418,26 +283,24 @@ export default function HomeScreen() {
               />
             </TouchableOpacity>
 
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Buscar peças, marcas..."
-              placeholderTextColor="#888"
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              onSubmitEditing={handleSearch}
-              returnKeyType="search"
-              autoCapitalize="none"
-            />
-
+<TextInput
+  style={styles.searchInput}
+  placeholder="Buscar peças, marcas..."
+  placeholderTextColor="#888"
+  value={searchQuery}
+  onChangeText={setSearchQuery}
+  onSubmitEditing={handleSearch}
+  returnKeyType="search"
+  autoCapitalize="none"
+  autoCorrect={false}
+  textAlignVertical="center"
+  includeFontPadding={false}
+/>
           </View>
-
-          {/* PERFIL */}
 
           <TouchableOpacity
             style={styles.profileButton}
-            onPress={() =>
-              router.push("/perfil")
-            }
+            onPress={() => router.push("/perfil")}
           >
             {profileImage ? (
               <Image
@@ -461,12 +324,7 @@ export default function HomeScreen() {
               />
             )}
           </TouchableOpacity>
-
         </View>
-
-        {/* ============================================================
-            CATEGORIAS
-        ============================================================ */}
 
         <ScrollView
           horizontal
@@ -485,9 +343,7 @@ export default function HomeScreen() {
                   styles.activeCategoryTab,
               ]}
               onPress={() =>
-                handleCategory(
-                  category.id
-                )
+                handleCategory(category.id)
               }
               activeOpacity={0.7}
             >
@@ -504,12 +360,7 @@ export default function HomeScreen() {
           ))}
         </ScrollView>
 
-        {/* ============================================================
-            BANNERS
-        ============================================================ */}
-
         <View style={styles.featuredSection}>
-
           <Text style={styles.sectionTitle}>
             Destaques da Semana
           </Text>
@@ -528,65 +379,40 @@ export default function HomeScreen() {
                 key={banner.id}
                 style={styles.bannerCard}
               >
-
-                <View
-                  style={styles.bannerBadge}
-                >
-                  <Text
-                    style={styles.badgeText}
-                  >
+                <View style={styles.bannerBadge}>
+                  <Text style={styles.badgeText}>
                     PROMO
                   </Text>
                 </View>
 
-                <Text
-                  style={styles.bannerTitle}
-                >
+                <Text style={styles.bannerTitle}>
                   {banner.title}
                 </Text>
 
-                <Text
-                  style={styles.bannerSubtitle}
-                >
+                <Text style={styles.bannerSubtitle}>
                   {banner.subtitle}
                 </Text>
-
               </View>
             ))}
           </ScrollView>
 
-          <View
-            style={styles.dotsContainer}
-          >
+          <View style={styles.dotsContainer}>
             <View
               style={[
                 styles.dot,
                 styles.activeDot,
               ]}
             />
-
             <View style={styles.dot} />
-
             <View style={styles.dot} />
           </View>
-
         </View>
 
-        {/* ============================================================
-            PRODUTOS / ANÚNCIOS RECENTES
-        ============================================================ */}
-
         <View style={styles.productsSection}>
-
           <View style={styles.titleRow}>
-
-            <Text
-              style={styles.sectionTitle}
-            >
+            <Text style={styles.sectionTitle}>
               Adicionados Recentemente
             </Text>
-
-            {/* VER TODOS */}
 
             <TouchableOpacity
               onPress={() =>
@@ -596,16 +422,11 @@ export default function HomeScreen() {
               }
               activeOpacity={0.7}
             >
-              <Text
-                style={styles.seeMoreText}
-              >
+              <Text style={styles.seeMoreText}>
                 Ver todos
               </Text>
             </TouchableOpacity>
-
           </View>
-
-          {/* LOADING */}
 
           {loading ? (
             <ActivityIndicator
@@ -617,22 +438,16 @@ export default function HomeScreen() {
             <FlatList
               data={products}
               horizontal
-              showsHorizontalScrollIndicator={
-                false
-              }
+              showsHorizontalScrollIndicator={false}
               keyExtractor={(item) =>
-                String(
-                  item.id_produto
-                )
+                String(item.id_produto)
               }
               contentContainerStyle={
                 styles.productListContent
               }
               nestedScrollEnabled
               ListEmptyComponent={
-                <Text
-                  style={styles.emptyText}
-                >
+                <Text style={styles.emptyText}>
                   Nenhum produto anunciado
                   ainda.
                 </Text>
@@ -642,11 +457,6 @@ export default function HomeScreen() {
               }: {
                 item: Produto;
               }) => {
-
-                /*
-                 * PRIMEIRA IMAGEM DO PRODUTO
-                 */
-
                 const imagemUrl =
                   getImageUrl(
                     item.images?.[0]
@@ -665,11 +475,6 @@ export default function HomeScreen() {
                     }
                     activeOpacity={0.85}
                   >
-
-                    {/* ==================================================
-                        IMAGEM
-                    ================================================== */}
-
                     <View
                       style={
                         styles.productImagePlaceholder
@@ -704,16 +509,11 @@ export default function HomeScreen() {
                       )}
                     </View>
 
-                    {/* ==================================================
-                        INFORMAÇÕES
-                    ================================================== */}
-
                     <View
                       style={
                         styles.productInfo
                       }
                     >
-
                       <Text
                         style={
                           styles.productName
@@ -744,128 +544,19 @@ export default function HomeScreen() {
                         {item.ds_produto ||
                           "Sem descrição"}
                       </Text>
-
                     </View>
-
                   </TouchableOpacity>
                 );
               }}
             />
           )}
-
         </View>
-
       </ScrollView>
-
-      {/* ================================================================
-          BARRA DE NAVEGAÇÃO INFERIOR
-      ================================================================ */}
-
-      <View style={styles.bottomNav}>
-
-        {/* HOME */}
-
-        <TouchableOpacity
-          style={styles.navItem}
-          onPress={() =>
-            router.replace("/")
-          }
-          activeOpacity={0.7}
-        >
-          <Feather
-            name="home"
-            size={24}
-            color="#005386"
-          />
-        </TouchableOpacity>
-
-        {/* MENSAGENS */}
-
-        <TouchableOpacity
-          style={styles.navItem}
-          onPress={() =>
-            router.push(
-              "/mensagens" as any
-            )
-          }
-          activeOpacity={0.7}
-        >
-          <Feather
-            name="message-square"
-            size={24}
-            color="#777777"
-          />
-        </TouchableOpacity>
-
-        {/* ANUNCIAR */}
-
-        <TouchableOpacity
-          style={styles.navItemCenter}
-          onPress={() =>
-            router.push(
-              "/announce" as any
-            )
-          }
-          activeOpacity={0.8}
-        >
-          <Feather
-            name="plus"
-            size={26}
-            color="#FFFFFF"
-          />
-        </TouchableOpacity>
-
-        {/* TROCAS */}
-
-        <TouchableOpacity
-          style={styles.navItem}
-          onPress={() =>
-            router.push(
-              "/trocas" as any
-            )
-          }
-          activeOpacity={0.7}
-        >
-          <Feather
-            name="repeat"
-            size={24}
-            color="#777777"
-          />
-        </TouchableOpacity>
-
-        {/* PERFIL */}
-
-        <TouchableOpacity
-          style={styles.navItem}
-          onPress={() =>
-            router.push(
-              "/perfil" as any
-            )
-          }
-          activeOpacity={0.7}
-        >
-          <Feather
-            name="user"
-            size={24}
-            color="#777777"
-          />
-        </TouchableOpacity>
-
-      </View>
     </View>
   );
 }
 
-/* ================================================================
-   ESTILOS
-================================================================ */
-
 const styles = StyleSheet.create({
-
-  /* ================================================================
-     CONTAINER
-  ================================================================ */
-
   mainContainer: {
     flex: 1,
     backgroundColor: "#FFFFFF",
@@ -874,12 +565,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#FFFFFF",
-    marginBottom: 65,
   },
-
-  /* ================================================================
-     HEADER
-  ================================================================ */
 
   headerContainer: {
     flexDirection: "row",
@@ -916,14 +602,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 
-  searchInput: {
-    flex: 1,
-    height: "100%",
-    fontSize: 13,
-    color: "#333333",
-    marginLeft: 8,
-    fontFamily: "Montserrat_400Regular",
-  },
+searchInput: {
+  flex: 1,
+  height: 38,
+  paddingVertical: 0,
+  paddingHorizontal: 0,
+  fontSize: 13,
+  color: "#333333",
+  marginLeft: 8,
+  fontFamily: "Montserrat_400Regular",
+  textAlignVertical: "center",
+},
 
   profileButton: {
     width: 40,
@@ -938,18 +627,6 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "100%",
   },
-
-  bottomProfileImage: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    borderWidth: 1,
-    borderColor: "#EEEEEE",
-  },
-
-  /* ================================================================
-     CATEGORIAS
-  ================================================================ */
 
   categoriesScrollView: {
     maxHeight: 50,
@@ -983,10 +660,6 @@ const styles = StyleSheet.create({
     color: "#005386",
     fontFamily: "Montserrat_600SemiBold",
   },
-
-  /* ================================================================
-     BANNERS
-  ================================================================ */
 
   featuredSection: {
     marginTop: 20,
@@ -1071,10 +744,6 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
 
-  /* ================================================================
-     PRODUTOS
-  ================================================================ */
-
   productsSection: {
     marginTop: 25,
     marginBottom: 30,
@@ -1155,43 +824,5 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 16,
     fontFamily: "Montserrat_400Regular",
-  },
-
-  /* ================================================================
-     MENU INFERIOR
-  ================================================================ */
-
-  bottomNav: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 60,
-    backgroundColor: "#FFFFFF",
-    flexDirection: "row",
-    justifyContent: "space-around",
-    alignItems: "center",
-    borderTopWidth: 1,
-    borderTopColor: "#EEEEEE",
-    elevation: 10,
-    zIndex: 100,
-  },
-
-  navItem: {
-    justifyContent: "center",
-    alignItems: "center",
-    flex: 1,
-    height: "100%",
-  },
-
-  navItemCenter: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#0099FF",
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 10,
-    elevation: 4,
   },
 });

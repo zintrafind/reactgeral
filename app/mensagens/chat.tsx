@@ -17,6 +17,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type Message = {
   id: string;
@@ -66,17 +67,14 @@ type Proposta = {
   id_solicitante: number;
   id_destinatario: number;
   st_troca: string;
-
   st_confirmacao_solicitante?: string;
   st_confirmacao_destinatario?: string;
-
   solicitante?: Usuario;
   destinatario?: Usuario;
   itens?: ItemProposta[];
 };
 
 const API_URL = "http://127.0.0.1:8000";
-
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 
 const ALLOWED_IMAGE_TYPES = [
@@ -89,6 +87,7 @@ const ALLOWED_IMAGE_TYPES = [
 export default function ChatScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
+  const insets = useSafeAreaInsets();
 
   const idProposta = params.id_proposta
     ? String(params.id_proposta)
@@ -103,12 +102,9 @@ export default function ChatScreen() {
   const [loadingMessages, setLoadingMessages] = useState(true);
   const [sendingMessage, setSendingMessage] = useState(false);
   const [usuarioLogado, setUsuarioLogado] = useState<number | null>(null);
-
   const [idOutroUsuario, setIdOutroUsuario] = useState<number | null>(null);
   const [nomeOutroUsuario, setNomeOutroUsuario] = useState("");
-  const [fotoOutroUsuario, setFotoOutroUsuario] =
-    useState<string | null>(null);
-
+  const [fotoOutroUsuario, setFotoOutroUsuario] = useState<string | null>(null);
   const [idProduto, setIdProduto] = useState<number | null>(null);
   const [nomeProduto, setNomeProduto] = useState("");
   const [fotoProduto, setFotoProduto] = useState<string | null>(null);
@@ -125,24 +121,34 @@ export default function ChatScreen() {
   } | null>(null);
 
   const getImageUrl = (imagePath?: string | null) => {
-    if (!imagePath) return null;
-
-    if (
-      imagePath.startsWith("http://") ||
-      imagePath.startsWith("https://")
-    ) {
-      return imagePath;
+    if (!imagePath) {
+      return null;
     }
 
-    const normalizedPath = imagePath
+    const path = String(imagePath).trim();
+
+    if (!path) {
+      return null;
+    }
+
+    if (
+      path.startsWith("http://") ||
+      path.startsWith("https://")
+    ) {
+      return path;
+    }
+
+    const normalizedPath = path
       .replace(/^\/+/, "")
-      .replace(/^storage\//, "");
+      .replace(/^storage\/+/, "");
 
     return `${API_URL}/storage/${normalizedPath}`;
   };
 
   const getProductImage = (produto?: Produto | null) => {
-    if (!produto) return null;
+    if (!produto) {
+      return null;
+    }
 
     if (
       typeof produto.ds_imagem === "string" &&
@@ -151,16 +157,18 @@ export default function ChatScreen() {
       return getImageUrl(produto.ds_imagem);
     }
 
-    const possiveisImagens: any[] = [
-      produto.imagens,
+    const possiveisImagens = [
       produto.images,
+      produto.imagens,
       produto.imagem,
       produto.imagem_produto,
       produto.imagens_produto,
     ];
 
     for (const lista of possiveisImagens) {
-      if (!Array.isArray(lista) || lista.length === 0) continue;
+      if (!Array.isArray(lista) || lista.length === 0) {
+        continue;
+      }
 
       for (const imagem of lista) {
         if (typeof imagem === "string" && imagem.trim()) {
@@ -174,7 +182,10 @@ export default function ChatScreen() {
             imagem.url ||
             imagem.path;
 
-          if (typeof caminho === "string" && caminho.trim()) {
+          if (
+            typeof caminho === "string" &&
+            caminho.trim()
+          ) {
             return getImageUrl(caminho);
           }
         }
@@ -185,11 +196,15 @@ export default function ChatScreen() {
   };
 
   const formatarHora = (data?: string) => {
-    if (!data) return "";
+    if (!data) {
+      return "";
+    }
 
     const dataMensagem = new Date(data);
 
-    if (isNaN(dataMensagem.getTime())) return "";
+    if (isNaN(dataMensagem.getTime())) {
+      return "";
+    }
 
     return dataMensagem.toLocaleTimeString("pt-BR", {
       hour: "2-digit",
@@ -200,9 +215,12 @@ export default function ChatScreen() {
   useEffect(() => {
     const carregarUsuarioLogado = async () => {
       try {
-        const usuarioStorage = await AsyncStorage.getItem("usuario");
+        const usuarioStorage =
+          await AsyncStorage.getItem("usuario");
 
-        if (!usuarioStorage) return;
+        if (!usuarioStorage) {
+          return;
+        }
 
         const usuario = JSON.parse(usuarioStorage);
 
@@ -210,35 +228,39 @@ export default function ChatScreen() {
           setUsuarioLogado(Number(usuario.id_usuario));
         }
       } catch (error) {
-        console.error("Erro ao carregar usuário logado:", error);
+        console.error(
+          "Erro ao carregar usuário logado:",
+          error
+        );
       }
     };
 
     carregarUsuarioLogado();
   }, []);
 
-  /*
-   * Carrega os dados da proposta.
-   *
-   * Essa função também é usada pelo intervalo de atualização,
-   * para que a confirmação do outro usuário apareça automaticamente.
-   */
   const carregarDadosProposta = useCallback(
     async (mostrarErro = false) => {
-      if (!idProposta || usuarioLogado === null) return;
+      if (!idProposta || usuarioLogado === null) {
+        return;
+      }
 
       try {
         const token = await AsyncStorage.getItem("token");
 
-        if (!token) return;
+        if (!token) {
+          return;
+        }
 
-        const response = await fetch(`${API_URL}/api/propostas`, {
-          method: "GET",
-          headers: {
-            Accept: "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-        });
+        const response = await fetch(
+          `${API_URL}/api/propostas`,
+          {
+            method: "GET",
+            headers: {
+              Accept: "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
 
         const data = await response.json();
 
@@ -257,10 +279,12 @@ export default function ChatScreen() {
           ? data.propostas
           : [];
 
-        const proposta: Proposta | undefined = propostas.find(
-          (item: Proposta) =>
-            Number(item.id_proposta) === Number(idProposta)
-        );
+        const proposta: Proposta | undefined =
+          propostas.find(
+            (item: Proposta) =>
+              Number(item.id_proposta) ===
+              Number(idProposta)
+          );
 
         if (!proposta) {
           if (mostrarErro) {
@@ -274,21 +298,27 @@ export default function ChatScreen() {
         }
 
         const outroUsuario =
-          Number(proposta.id_solicitante) === Number(usuarioLogado)
+          Number(proposta.id_solicitante) ===
+          Number(usuarioLogado)
             ? proposta.destinatario
             : proposta.solicitante;
 
         if (outroUsuario) {
-          setIdOutroUsuario(Number(outroUsuario.id_usuario));
-          setNomeOutroUsuario(outroUsuario.nm_usuario || "");
+          setIdOutroUsuario(
+            Number(outroUsuario.id_usuario)
+          );
+
+          setNomeOutroUsuario(
+            outroUsuario.nm_usuario || ""
+          );
+
           setFotoOutroUsuario(
-            getImageUrl(outroUsuario.ds_foto_perfil)
+            getImageUrl(
+              outroUsuario.ds_foto_perfil
+            )
           );
         }
 
-        /*
-         * Define o estado da troca para o usuário atual.
-         */
         if (proposta.st_troca === "F") {
           setTradeStatus("concluida");
         } else {
@@ -296,9 +326,10 @@ export default function ChatScreen() {
             Number(proposta.id_solicitante) ===
             Number(usuarioLogado);
 
-          const minhaConfirmacao = usuarioEhSolicitante
-            ? proposta.st_confirmacao_solicitante
-            : proposta.st_confirmacao_destinatario;
+          const minhaConfirmacao =
+            usuarioEhSolicitante
+              ? proposta.st_confirmacao_solicitante
+              : proposta.st_confirmacao_destinatario;
 
           if (minhaConfirmacao === "S") {
             setTradeStatus("confirmada_por_mim");
@@ -315,7 +346,9 @@ export default function ChatScreen() {
           (item: ItemProposta) => {
             const produto = item.produto;
 
-            if (!produto) return false;
+            if (!produto) {
+              return false;
+            }
 
             return (
               Number(produto.id_usuario) !==
@@ -325,25 +358,33 @@ export default function ChatScreen() {
         );
 
         if (itemDoOutroUsuario?.produto) {
-          const produto = itemDoOutroUsuario.produto;
+          const produto =
+            itemDoOutroUsuario.produto;
 
-          setIdProduto(Number(produto.id_produto));
-          setNomeProduto(produto.nm_produto || "");
+          setIdProduto(
+            Number(produto.id_produto)
+          );
 
-          let imagemProduto = getProductImage(produto);
+          setNomeProduto(
+            produto.nm_produto || ""
+          );
+
+          let imagemProduto =
+            getProductImage(produto);
 
           if (!imagemProduto) {
             try {
-              const produtoResponse = await fetch(
-                `${API_URL}/api/products/${produto.id_produto}`,
-                {
-                  method: "GET",
-                  headers: {
-                    Accept: "application/json",
-                    Authorization: `Bearer ${token}`,
-                  },
-                }
-              );
+              const produtoResponse =
+                await fetch(
+                  `${API_URL}/api/products/${produto.id_produto}`,
+                  {
+                    method: "GET",
+                    headers: {
+                      Accept: "application/json",
+                      Authorization: `Bearer ${token}`,
+                    },
+                  }
+                );
 
               const produtoData =
                 await produtoResponse.json();
@@ -356,9 +397,13 @@ export default function ChatScreen() {
                   produtoData;
 
                 imagemProduto =
-                  getProductImage(produtoCompleto);
+                  getProductImage(
+                    produtoCompleto
+                  );
 
-                if (produtoCompleto?.nm_produto) {
+                if (
+                  produtoCompleto?.nm_produto
+                ) {
                   setNomeProduto(
                     produtoCompleto.nm_produto
                   );
@@ -396,12 +441,6 @@ export default function ChatScreen() {
     carregarDadosProposta(true);
   }, [carregarDadosProposta]);
 
-  /*
-   * Atualiza o estado da proposta a cada 5 segundos.
-   *
-   * Isso permite que, quando o outro usuário confirmar,
-   * o chat seja atualizado automaticamente.
-   */
   useEffect(() => {
     if (
       usuarioLogado === null ||
@@ -450,7 +489,8 @@ export default function ChatScreen() {
           setLoadingMessages(true);
         }
 
-        const token = await AsyncStorage.getItem("token");
+        const token =
+          await AsyncStorage.getItem("token");
 
         if (!token) {
           if (mostrarLoading) {
@@ -488,71 +528,100 @@ export default function ChatScreen() {
           return;
         }
 
-        const mensagensRecebidas = Array.isArray(
-          data.mensagens
-        )
-          ? data.mensagens
-          : [];
+        const mensagensRecebidas =
+          Array.isArray(data.mensagens)
+            ? data.mensagens
+            : [];
 
         const mensagensFormatadas: Message[] =
           mensagensRecebidas
             .map((mensagem: any) => ({
-              id: String(mensagem.id_mensagem),
+              id: String(
+                mensagem.id_mensagem
+              ),
               sender:
                 Number(mensagem.id_usuario) ===
                 Number(usuarioLogado)
                   ? "me"
                   : "other",
-              text: mensagem.ds_mensagem || null,
+              text:
+                mensagem.ds_mensagem ||
+                null,
               image: getImageUrl(
                 mensagem.ds_imagem
               ),
-              createdAt: mensagem.created_at,
+              createdAt:
+                mensagem.created_at,
             }))
-            .sort((a: Message, b: Message) => {
-              const dataA = a.createdAt
-                ? new Date(a.createdAt).getTime()
-                : NaN;
+            .sort(
+              (
+                a: Message,
+                b: Message
+              ) => {
+                const dataA =
+                  a.createdAt
+                    ? new Date(
+                        a.createdAt
+                      ).getTime()
+                    : NaN;
 
-              const dataB = b.createdAt
-                ? new Date(b.createdAt).getTime()
-                : NaN;
+                const dataB =
+                  b.createdAt
+                    ? new Date(
+                        b.createdAt
+                      ).getTime()
+                    : NaN;
 
-              if (
-                !Number.isNaN(dataA) &&
-                !Number.isNaN(dataB) &&
-                dataA !== dataB
-              ) {
-                return dataA - dataB;
+                if (
+                  !Number.isNaN(dataA) &&
+                  !Number.isNaN(dataB) &&
+                  dataA !== dataB
+                ) {
+                  return dataA - dataB;
+                }
+
+                return (
+                  Number(a.id) -
+                  Number(b.id)
+                );
               }
-
-              return (
-                Number(a.id) - Number(b.id)
-              );
-            });
-
-        setMessages((mensagensAtuais) => {
-          const mensagensIguais =
-            mensagensAtuais.length ===
-              mensagensFormatadas.length &&
-            mensagensAtuais.every(
-              (mensagem, index) =>
-                mensagem.id ===
-                  mensagensFormatadas[index]?.id &&
-                mensagem.text ===
-                  mensagensFormatadas[index]?.text &&
-                mensagem.image ===
-                  mensagensFormatadas[index]?.image &&
-                mensagem.sender ===
-                  mensagensFormatadas[index]?.sender
             );
 
-          if (mensagensIguais) {
-            return mensagensAtuais;
-          }
+        setMessages(
+          (mensagensAtuais) => {
+            const mensagensIguais =
+              mensagensAtuais.length ===
+                mensagensFormatadas.length &&
+              mensagensAtuais.every(
+                (
+                  mensagem,
+                  index
+                ) =>
+                  mensagem.id ===
+                    mensagensFormatadas[
+                      index
+                    ]?.id &&
+                  mensagem.text ===
+                    mensagensFormatadas[
+                      index
+                    ]?.text &&
+                  mensagem.image ===
+                    mensagensFormatadas[
+                      index
+                    ]?.image &&
+                  mensagem.sender ===
+                    mensagensFormatadas[
+                      index
+                    ]?.sender
+              );
 
-          return mensagensFormatadas;
-        });
+            if (mensagensIguais) {
+              return mensagensAtuais;
+            }
+
+            return mensagensFormatadas;
+          }
+        );
       } catch (error) {
         console.error(
           "Erro ao carregar mensagens:",
@@ -581,8 +650,8 @@ export default function ChatScreen() {
   useEffect(() => {
     initialScrollDone.current = false;
 
-    scrollTimers.current.forEach((timer) =>
-      clearTimeout(timer)
+    scrollTimers.current.forEach(
+      (timer) => clearTimeout(timer)
     );
 
     scrollTimers.current = [];
@@ -664,83 +733,6 @@ export default function ChatScreen() {
     } as any);
   };
 
-  const selecionarImagem = () => {
-    if (sendingMessage) return;
-
-    if (Platform.OS === "web") {
-      const input =
-        document.createElement("input");
-
-      input.type = "file";
-      input.accept =
-        "image/jpeg,image/png,image/gif,image/webp";
-
-      input.onchange = (event: any) => {
-        const file =
-          event.target.files?.[0];
-
-        if (!file) return;
-
-        if (file.size > MAX_IMAGE_SIZE) {
-          Alert.alert(
-            "Arquivo muito grande",
-            "A imagem deve ter no máximo 5MB."
-          );
-
-          return;
-        }
-
-        if (
-          !ALLOWED_IMAGE_TYPES.includes(
-            file.type
-          )
-        ) {
-          Alert.alert(
-            "Formato não suportado",
-            "Use JPG, PNG, GIF ou WEBP."
-          );
-
-          return;
-        }
-
-        const uri =
-          URL.createObjectURL(file);
-
-        setImagemSelecionada({
-          uri,
-          name: file.name,
-          type: file.type,
-          file,
-        });
-
-        input.value = "";
-      };
-
-      input.click();
-
-      return;
-    }
-
-    Alert.alert(
-      "Enviar imagem",
-      "Escolha uma opção",
-      [
-        {
-          text: "Galeria",
-          onPress: abrirGaleria,
-        },
-        {
-          text: "Câmera",
-          onPress: abrirCamera,
-        },
-        {
-          text: "Cancelar",
-          style: "cancel",
-        },
-      ]
-    );
-  };
-
   const abrirGaleria = async () => {
     try {
       const permissao =
@@ -762,12 +754,16 @@ export default function ChatScreen() {
           quality: 0.8,
         });
 
-      if (resultado.canceled) return;
+      if (resultado.canceled) {
+        return;
+      }
 
       const imagem =
         resultado.assets?.[0];
 
-      if (!imagem?.uri) return;
+      if (!imagem?.uri) {
+        return;
+      }
 
       if (
         imagem.fileSize &&
@@ -844,12 +840,16 @@ export default function ChatScreen() {
           quality: 0.8,
         });
 
-      if (resultado.canceled) return;
+      if (resultado.canceled) {
+        return;
+      }
 
       const imagem =
         resultado.assets?.[0];
 
-      if (!imagem?.uri) return;
+      if (!imagem?.uri) {
+        return;
+      }
 
       if (
         imagem.fileSize &&
@@ -905,8 +905,91 @@ export default function ChatScreen() {
     }
   };
 
+  const selecionarImagem = () => {
+    if (sendingMessage) {
+      return;
+    }
+
+    if (Platform.OS === "web") {
+      const input =
+        document.createElement("input");
+
+      input.type = "file";
+      input.accept =
+        "image/jpeg,image/png,image/gif,image/webp";
+
+      input.onchange = (event: any) => {
+        const file =
+          event.target.files?.[0];
+
+        if (!file) {
+          return;
+        }
+
+        if (file.size > MAX_IMAGE_SIZE) {
+          Alert.alert(
+            "Arquivo muito grande",
+            "A imagem deve ter no máximo 5MB."
+          );
+
+          return;
+        }
+
+        if (
+          !ALLOWED_IMAGE_TYPES.includes(
+            file.type
+          )
+        ) {
+          Alert.alert(
+            "Formato não suportado",
+            "Use JPG, PNG, GIF ou WEBP."
+          );
+
+          return;
+        }
+
+        const uri =
+          URL.createObjectURL(file);
+
+        setImagemSelecionada({
+          uri,
+          name: file.name,
+          type: file.type,
+          file,
+        });
+
+        input.value = "";
+      };
+
+      input.click();
+
+      return;
+    }
+
+    Alert.alert(
+      "Enviar imagem",
+      "Escolha uma opção",
+      [
+        {
+          text: "Galeria",
+          onPress: abrirGaleria,
+        },
+        {
+          text: "Câmera",
+          onPress: abrirCamera,
+        },
+        {
+          text: "Cancelar",
+          style: "cancel",
+        },
+      ]
+    );
+  };
+
   const removerImagemSelecionada = () => {
-    if (sendingMessage) return;
+    if (sendingMessage) {
+      return;
+    }
 
     if (
       imagemSelecionada?.uri &&
@@ -921,7 +1004,8 @@ export default function ChatScreen() {
   };
 
   const handleSendMessage = async () => {
-    const mensagem = inputText.trim();
+    const mensagem =
+      inputText.trim();
 
     if (
       mensagem === "" &&
@@ -939,7 +1023,9 @@ export default function ChatScreen() {
       return;
     }
 
-    if (sendingMessage) return;
+    if (sendingMessage) {
+      return;
+    }
 
     try {
       setSendingMessage(true);
@@ -957,7 +1043,8 @@ export default function ChatScreen() {
         return;
       }
 
-      const formData = new FormData();
+      const formData =
+        new FormData();
 
       if (mensagem !== "") {
         formData.append(
@@ -1193,11 +1280,9 @@ export default function ChatScreen() {
         return;
       }
 
-      /*
-       * O backend informa se os dois usuários
-       * já confirmaram ou não.
-       */
-      if (data?.troca_concluida === true) {
+      if (
+        data?.troca_concluida === true
+      ) {
         setTradeStatus("concluida");
 
         const systemMessage: Message = {
@@ -1221,10 +1306,9 @@ export default function ChatScreen() {
         return;
       }
 
-      /*
-       * Apenas este usuário confirmou.
-       */
-      setTradeStatus("confirmada_por_mim");
+      setTradeStatus(
+        "confirmada_por_mim"
+      );
 
       Alert.alert(
         "Confirmação registrada",
@@ -1270,7 +1354,9 @@ export default function ChatScreen() {
           });
         }, delay);
 
-        scrollTimers.current.push(timer);
+        scrollTimers.current.push(
+          timer
+        );
       });
 
       const finalTimer = setTimeout(
@@ -1316,6 +1402,12 @@ export default function ChatScreen() {
     rolarParaUltimaMensagem,
   ]);
 
+  const inputBottomSpace =
+    Math.max(insets.bottom, 8) + 6;
+
+  const previewBottom =
+    inputBottomSpace + 64;
+
   return (
     <SafeAreaView
       style={styles.mainContainer}
@@ -1324,7 +1416,7 @@ export default function ChatScreen() {
         behavior={
           Platform.OS === "ios"
             ? "padding"
-            : "height"
+            : undefined
         }
         style={{ flex: 1 }}
       >
@@ -1334,9 +1426,7 @@ export default function ChatScreen() {
               if (router.canGoBack()) {
                 router.back();
               } else {
-                router.replace(
-                  "/(tabs)"
-                );
+                router.replace("/");
               }
             }}
             style={styles.backBtn}
@@ -1357,7 +1447,9 @@ export default function ChatScreen() {
                 source={{
                   uri: fotoOutroUsuario,
                 }}
-                style={styles.headerAvatar}
+                style={
+                  styles.headerAvatar
+                }
               />
             ) : (
               <View
@@ -1414,6 +1506,12 @@ export default function ChatScreen() {
                 }}
                 style={styles.bannerImage}
                 resizeMode="cover"
+                onError={(event) => {
+                  console.error(
+                    "Erro ao carregar imagem do anúncio:",
+                    event.nativeEvent.error
+                  );
+                }}
               />
             ) : (
               <View
@@ -1430,7 +1528,9 @@ export default function ChatScreen() {
             )}
 
             <View style={styles.bannerInfo}>
-              <Text style={styles.bannerLabel}>
+              <Text
+                style={styles.bannerLabel}
+              >
                 Negociando sobre:
               </Text>
 
@@ -1442,7 +1542,9 @@ export default function ChatScreen() {
                   "Anúncio"}
               </Text>
 
-              <Text style={styles.bannerHint}>
+              <Text
+                style={styles.bannerHint}
+              >
                 Toque para visualizar
               </Text>
             </View>
@@ -1458,16 +1560,20 @@ export default function ChatScreen() {
                 ? styles.finishBtnWaiting
                 : styles.finishBtnActive,
             ]}
-            onPress={handleFinalizeTrade}
+            onPress={
+              handleFinalizeTrade
+            }
             disabled={
-              tradeStatus === "concluida" ||
+              tradeStatus ===
+                "concluida" ||
               tradeStatus ===
                 "confirmada_por_mim"
             }
           >
             <Feather
               name={
-                tradeStatus === "concluida"
+                tradeStatus ===
+                "concluida"
                   ? "check-circle"
                   : tradeStatus ===
                     "confirmada_por_mim"
@@ -1478,8 +1584,13 @@ export default function ChatScreen() {
               color="#FFFFFF"
             />
 
-            <Text style={styles.finishBtnText}>
-              {tradeStatus === "concluida"
+            <Text
+              style={
+                styles.finishBtnText
+              }
+            >
+              {tradeStatus ===
+              "concluida"
                 ? "Concluída"
                 : tradeStatus ===
                   "confirmada_por_mim"
@@ -1595,9 +1706,12 @@ export default function ChatScreen() {
 
         {imagemSelecionada ? (
           <View
-            style={
-              styles.imagePreviewContainer
-            }
+            style={[
+              styles.imagePreviewContainer,
+              {
+                bottom: previewBottom,
+              },
+            ]}
           >
             <Image
               source={{
@@ -1633,14 +1747,23 @@ export default function ChatScreen() {
           </View>
         ) : null}
 
-        <View style={styles.inputContainer}>
+        <View
+          style={[
+            styles.inputContainer,
+            {
+              bottom: inputBottomSpace,
+            },
+          ]}
+        >
           <TouchableOpacity
             style={[
               styles.imageButton,
               sendingMessage &&
                 styles.imageButtonDisabled,
             ]}
-            onPress={selecionarImagem}
+            onPress={
+              selecionarImagem
+            }
             disabled={sendingMessage}
           >
             <Feather
@@ -1668,7 +1791,9 @@ export default function ChatScreen() {
                   !imagemSelecionada)) &&
                 styles.sendButtonDisabled,
             ]}
-            onPress={handleSendMessage}
+            onPress={
+              handleSendMessage
+            }
             disabled={
               sendingMessage ||
               (!inputText.trim() &&
@@ -1689,81 +1814,6 @@ export default function ChatScreen() {
             )}
           </TouchableOpacity>
         </View>
-
-        <View style={styles.bottomNav}>
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() =>
-              router.replace("/")
-            }
-          >
-            <Feather
-              name="home"
-              size={24}
-              color="#777777"
-            />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() =>
-              router.replace(
-                "/mensagens"
-              )
-            }
-          >
-            <Feather
-              name="message-square"
-              size={24}
-              color="#005386"
-            />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.navItemCenter}
-            onPress={() =>
-              router.replace(
-                "/announce" as any
-              )
-            }
-          >
-            <Feather
-              name="plus"
-              size={26}
-              color="#FFFFFF"
-            />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() =>
-              router.replace(
-                "/trocas" as any
-              )
-            }
-          >
-            <Feather
-              name="repeat"
-              size={24}
-              color="#777777"
-            />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() =>
-              router.replace(
-                "/perfil" as any
-              )
-            }
-          >
-            <Feather
-              name="user"
-              size={24}
-              color="#777777"
-            />
-          </TouchableOpacity>
-        </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -1774,7 +1824,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#FFFFFF",
   },
-
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -1785,18 +1834,15 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     paddingTop: 40,
   },
-
   backBtn: {
     marginRight: 10,
   },
-
   headerAvatar: {
     width: 40,
     height: 40,
     borderRadius: 20,
     backgroundColor: "#E4F8FF",
   },
-
   headerAvatarFallback: {
     width: 40,
     height: 40,
@@ -1805,24 +1851,19 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-
   headerInfo: {
     flex: 1,
     marginLeft: 12,
   },
-
   headerName: {
     fontSize: 15,
-    fontFamily:
-      "Montserrat_600SemiBold",
+    fontFamily: "Montserrat_600SemiBold",
     color: "#005386",
   },
-
   headerStatus: {
     fontSize: 12,
     color: "#777777",
   },
-
   productBanner: {
     flexDirection: "row",
     alignItems: "center",
@@ -1831,21 +1872,18 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#E5E5E5",
   },
-
   productClickable: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
     minWidth: 0,
   },
-
   bannerImage: {
     width: 55,
     height: 55,
     borderRadius: 8,
     backgroundColor: "#DDDDDD",
   },
-
   bannerImageFallback: {
     width: 55,
     height: 55,
@@ -1854,31 +1892,25 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-
   bannerInfo: {
     flex: 1,
     marginLeft: 10,
     marginRight: 8,
   },
-
   bannerLabel: {
     fontSize: 11,
     color: "#777777",
   },
-
   bannerTitle: {
     fontSize: 13,
-    fontFamily:
-      "Montserrat_600SemiBold",
+    fontFamily: "Montserrat_600SemiBold",
     color: "#005386",
   },
-
   bannerHint: {
     fontSize: 10,
     color: "#999999",
     marginTop: 2,
   },
-
   finishBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -1887,84 +1919,67 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     gap: 4,
   },
-
   finishBtnActive: {
     backgroundColor: "#0099FF",
   },
-
   finishBtnWaiting: {
     backgroundColor: "#777777",
   },
-
   finishBtnDone: {
     backgroundColor: "#28A745",
   },
-
   finishBtnText: {
     color: "#FFFFFF",
     fontSize: 12,
-    fontFamily:
-      "Montserrat_600SemiBold",
+    fontFamily: "Montserrat_600SemiBold",
   },
-
   chatContainer: {
     padding: 16,
     paddingBottom: 180,
   },
-
   messageBubble: {
     maxWidth: "75%",
     padding: 8,
     borderRadius: 14,
     marginVertical: 6,
   },
-
   myMessage: {
     backgroundColor: "#0099FF",
     alignSelf: "flex-end",
     borderBottomRightRadius: 2,
   },
-
   otherMessage: {
     backgroundColor: "#F0F2F5",
     alignSelf: "flex-start",
     borderBottomLeftRadius: 2,
   },
-
   messageImage: {
     width: 220,
     height: 220,
     borderRadius: 10,
     marginBottom: 4,
   },
-
   messageText: {
     fontSize: 14,
     flexShrink: 1,
   },
-
   myMessageText: {
     color: "#FFFFFF",
   },
-
   otherMessageText: {
     color: "#333333",
   },
-
   messageTime: {
     fontSize: 10,
     marginLeft: 8,
     marginTop: 3,
   },
-
   myMessageTime: {
     color: "#D9F1FF",
   },
-
   otherMessageTime: {
     color: "#777777",
   },
-
   systemMessageBubble: {
     backgroundColor: "#FFE5E5",
     padding: 10,
@@ -1974,25 +1989,20 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#F1BDBD",
   },
-
   systemMessageText: {
     color: "#D9534F",
     fontSize: 12,
     textAlign: "center",
-    fontFamily:
-      "Montserrat_600SemiBold",
+    fontFamily: "Montserrat_600SemiBold",
   },
-
   emptyMessages: {
     textAlign: "center",
     color: "#777777",
     fontSize: 14,
     marginTop: 30,
   },
-
   imagePreviewContainer: {
     position: "absolute",
-    bottom: 110,
     left: 16,
     width: 120,
     height: 120,
@@ -2011,20 +2021,17 @@ const styles = StyleSheet.create({
     },
     zIndex: 20,
   },
-
   imagePreview: {
     width: "100%",
     height: "85%",
     borderRadius: 9,
   },
-
   imagePreviewName: {
     fontSize: 9,
     color: "#777777",
     textAlign: "center",
     marginTop: 2,
   },
-
   removeImageButton: {
     position: "absolute",
     top: -8,
@@ -2037,10 +2044,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     zIndex: 30,
   },
-
   inputContainer: {
     position: "absolute",
-    bottom: 60,
     left: 0,
     right: 0,
     flexDirection: "row",
@@ -2053,7 +2058,6 @@ const styles = StyleSheet.create({
     zIndex: 10,
     elevation: 20,
   },
-
   imageButton: {
     width: 40,
     height: 40,
@@ -2063,11 +2067,9 @@ const styles = StyleSheet.create({
     marginRight: 6,
     backgroundColor: "#F4F8FB",
   },
-
   imageButtonDisabled: {
     opacity: 0.5,
   },
-
   textInput: {
     flex: 1,
     minHeight: 40,
@@ -2080,7 +2082,6 @@ const styles = StyleSheet.create({
     borderColor: "#E5E5E5",
     fontSize: 14,
   },
-
   sendButton: {
     width: 40,
     height: 40,
@@ -2090,41 +2091,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginLeft: 8,
   },
-
   sendButtonDisabled: {
     opacity: 0.5,
-  },
-
-  bottomNav: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 60,
-    backgroundColor: "#FFFFFF",
-    flexDirection: "row",
-    alignItems: "center",
-    borderTopWidth: 1,
-    borderTopColor: "#EEEEEE",
-    elevation: 10,
-    zIndex: 100,
-  },
-
-  navItem: {
-    justifyContent: "center",
-    alignItems: "center",
-    flex: 1,
-    height: "100%",
-  },
-
-  navItemCenter: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#0099FF",
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 10,
-    elevation: 4,
   },
 });

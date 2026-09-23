@@ -2,7 +2,16 @@ import { Feather } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import api from "../../services/api";
 
 type Troca = {
   id: number;
@@ -24,8 +33,6 @@ export default function TrocasScreen() {
   const [loading, setLoading] = useState(true);
   const [usuarioLogado, setUsuarioLogado] = useState<number | null>(null);
 
-  const API_URL = "http://127.0.0.1:8000";
-
   // ============================================================
   // CARREGAR TROCAS
   // ============================================================
@@ -45,31 +52,31 @@ export default function TrocasScreen() {
         return;
       }
 
-      // Descobre quem está logado
+      let usuarioLogadoId = 0;
+
       if (usuarioStorage) {
         const usuario = JSON.parse(usuarioStorage);
 
         console.log("USUÁRIO LOGADO:", usuario);
 
-        setUsuarioLogado(Number(usuario.id_usuario));
+        usuarioLogadoId = Number(usuario.id_usuario);
+        setUsuarioLogado(usuarioLogadoId);
       }
 
-      // Busca as propostas reais
-      const response = await fetch(`${API_URL}/api/propostas`, {
-        method: "GET",
+      const response = await api.get("/propostas", {
         headers: {
           Accept: "application/json",
           Authorization: `Bearer ${token}`,
         },
       });
 
-      const data = await response.json();
-      console.log("========== TROCAS ==========");
-console.log("STATUS:", response.status);
-console.log("RESPOSTA:", JSON.stringify(data, null, 2));
-console.log("É ARRAY?", Array.isArray(data));
-console.log("============================");
+      const data = response.data;
 
+      console.log("========== TROCAS ==========");
+      console.log("STATUS:", response.status);
+      console.log("RESPOSTA:", JSON.stringify(data, null, 2));
+      console.log("É ARRAY?", Array.isArray(data));
+      console.log("============================");
 
       console.log(
         "PROPOSTAS RECEBIDAS:",
@@ -77,18 +84,15 @@ console.log("============================");
       );
 
       console.log("TIPO DA RESPOSTA:", Array.isArray(data));
-console.log("CHAVES DA RESPOSTA:", Object.keys(data || {}));
+      console.log(
+        "CHAVES DA RESPOSTA:",
+        Object.keys(data || {})
+      );
 
-      if (!response.ok) {
-        throw new Error(
-          data?.message ||
-            "Não foi possível carregar suas trocas."
-        );
-      }
+      const propostas = Array.isArray(data?.propostas)
+        ? data.propostas
+        : [];
 
-      const propostas = Array.isArray(data?.propostas)? data.propostas: [];
-
-      // Converte a resposta da API para o formato usado pelos cards
       const trocasFormatadas: Troca[] = propostas.map(
         (proposta: any) => {
           const produtoOferecido =
@@ -101,22 +105,25 @@ console.log("CHAVES DA RESPOSTA:", Object.keys(data || {}));
               (item: any) => item.tp_item === "D"
             )?.produto;
 
+          const idSolicitante = Number(
+            proposta.id_solicitante
+          );
+
+          const idDestinatario = Number(
+            proposta.id_destinatario
+          );
+
+          const souDestinatario =
+            idDestinatario === usuarioLogadoId;
+
           return {
             id: Number(proposta.id_proposta),
 
-            // Se a proposta foi recebida, mostramos quem enviou.
-            // Se foi enviada, mostramos quem recebeu.
-            usuarioProposta:
-              proposta.id_solicitante ===
-              Number(
-                usuarioStorage
-                  ? JSON.parse(usuarioStorage).id_usuario
-                  : 0
-              )
-                ? proposta.destinatario?.nm_usuario ||
-                  "Usuário"
-                : proposta.solicitante?.nm_usuario ||
-                  "Usuário",
+            usuarioProposta: souDestinatario
+              ? proposta.solicitante?.nm_usuario ||
+                "Usuário"
+              : proposta.destinatario?.nm_usuario ||
+                "Usuário",
 
             status:
               proposta.st_troca === "P"
@@ -127,47 +134,20 @@ console.log("CHAVES DA RESPOSTA:", Object.keys(data || {}));
                 ? "FINALIZADA"
                 : "RECUSADA",
 
-            // Para quem recebe:
-            // seu produto = produto desejado
-            //
-            // Para quem envia:
-            // seu produto = produto oferecido
-            meuProduto:
-              proposta.id_destinatario ===
-              Number(
-                usuarioStorage
-                  ? JSON.parse(usuarioStorage).id_usuario
-                  : 0
-              )
-                ? produtoDesejado?.nm_produto ||
-                  "Produto desejado"
-                : produtoOferecido?.nm_produto ||
-                  "Produto oferecido",
+            meuProduto: souDestinatario
+              ? produtoDesejado?.nm_produto ||
+                "Produto desejado"
+              : produtoOferecido?.nm_produto ||
+                "Produto oferecido",
 
-            // Para quem recebe:
-            // oferta = produto oferecido
-            //
-            // Para quem envia:
-            // oferta = produto desejado
-            produtoOfertado:
-              proposta.id_destinatario ===
-              Number(
-                usuarioStorage
-                  ? JSON.parse(usuarioStorage).id_usuario
-                  : 0
-              )
-                ? produtoOferecido?.nm_produto ||
-                  "Produto oferecido"
-                : produtoDesejado?.nm_produto ||
-                  "Produto desejado",
+            produtoOfertado: souDestinatario
+              ? produtoOferecido?.nm_produto ||
+                "Produto oferecido"
+              : produtoDesejado?.nm_produto ||
+                "Produto desejado",
 
-            idSolicitante: Number(
-              proposta.id_solicitante
-            ),
-
-            idDestinatario: Number(
-              proposta.id_destinatario
-            ),
+            idSolicitante,
+            idDestinatario,
           };
         }
       );
@@ -188,11 +168,12 @@ console.log("CHAVES DA RESPOSTA:", Object.keys(data || {}));
         error
       );
 
-      Alert.alert(
-        "Erro",
+      const mensagem =
+        error?.response?.data?.message ||
         error?.message ||
-          "Não foi possível carregar suas trocas."
-      );
+        "Não foi possível carregar suas trocas.";
+
+      Alert.alert("Erro", mensagem);
     } finally {
       setLoading(false);
     }
@@ -221,34 +202,25 @@ console.log("CHAVES DA RESPOSTA:", Object.keys(data || {}));
         return;
       }
 
-      const response = await fetch(
-        `${API_URL}/api/propostas/${id}/status`,
+      const response = await api.put(
+        `/propostas/${id}/status`,
         {
-          method: "PUT",
+          st_troca: status,
+        },
+        {
           headers: {
-            "Content-Type": "application/json",
             Accept: "application/json",
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({
-            st_troca: status,
-          }),
         }
       );
 
-      const data = await response.json();
+      const data = response.data;
 
       console.log(
         "RESPOSTA ALTERAÇÃO STATUS:",
         JSON.stringify(data, null, 2)
       );
-
-      if (!response.ok) {
-        throw new Error(
-          data?.message ||
-            "Não foi possível alterar o status da troca."
-        );
-      }
 
       Alert.alert(
         status === "A"
@@ -266,11 +238,12 @@ console.log("CHAVES DA RESPOSTA:", Object.keys(data || {}));
         error
       );
 
-      Alert.alert(
-        "Erro",
+      const mensagem =
+        error?.response?.data?.message ||
         error?.message ||
-          "Não foi possível alterar o status da troca."
-      );
+        "Não foi possível alterar o status da troca.";
+
+      Alert.alert("Erro", mensagem);
     }
   };
 
@@ -421,7 +394,6 @@ console.log("CHAVES DA RESPOSTA:", Object.keys(data || {}));
             </View>
           ) : (
             trocasFiltradas.map((item) => {
-              // Somente o destinatário pode aceitar ou recusar
               const podeResponder =
                 item.idDestinatario ===
                 usuarioLogado;
@@ -431,122 +403,139 @@ console.log("CHAVES DA RESPOSTA:", Object.keys(data || {}));
                   key={item.id}
                   style={styles.tradeCard}
                 >
-                 {/* TOPO DO CARD */}
-<View style={styles.cardHeader}>
-  <View style={styles.userInfoRow}>
-    <Feather
-      name="repeat"
-      size={18}
-      color="#005386"
-      style={{
-        marginRight: 8,
-      }}
-    />
+                  {/* TOPO DO CARD */}
+                  <View style={styles.cardHeader}>
+                    <View style={styles.userInfoRow}>
+                      <Feather
+                        name="repeat"
+                        size={18}
+                        color="#005386"
+                        style={{
+                          marginRight: 8,
+                        }}
+                      />
 
-    <Text style={styles.userName}>
-      {item.usuarioProposta}
-    </Text>
-  </View>
+                      <Text style={styles.userName}>
+                        {item.usuarioProposta}
+                      </Text>
+                    </View>
 
-  {/* STATUS */}
-  {item.status === "PENDENTE" && (
-    <View
-      style={[
-        styles.statusBadge,
-        { backgroundColor: "#FFF3CD" },
-      ]}
-    >
-      <Feather
-        name="clock"
-        size={12}
-        color="#856404"
-      />
+                    {/* STATUS */}
+                    {item.status === "PENDENTE" && (
+                      <View
+                        style={[
+                          styles.statusBadge,
+                          {
+                            backgroundColor:
+                              "#FFF3CD",
+                          },
+                        ]}
+                      >
+                        <Feather
+                          name="clock"
+                          size={12}
+                          color="#856404"
+                        />
 
-      <Text
-        style={[
-          styles.statusText,
-          { color: "#856404" },
-        ]}
-      >
-        Pendente
-      </Text>
-    </View>
-  )}
+                        <Text
+                          style={[
+                            styles.statusText,
+                            {
+                              color: "#856404",
+                            },
+                          ]}
+                        >
+                          Pendente
+                        </Text>
+                      </View>
+                    )}
 
-  {item.status === "ACEITA" && (
-    <View
-      style={[
-        styles.statusBadge,
-        { backgroundColor: "#D4EDDA" },
-      ]}
-    >
-      <Feather
-        name="check-circle"
-        size={12}
-        color="#155724"
-      />
+                    {item.status === "ACEITA" && (
+                      <View
+                        style={[
+                          styles.statusBadge,
+                          {
+                            backgroundColor:
+                              "#D4EDDA",
+                          },
+                        ]}
+                      >
+                        <Feather
+                          name="check-circle"
+                          size={12}
+                          color="#155724"
+                        />
 
-      <Text
-        style={[
-          styles.statusText,
-          { color: "#155724" },
-        ]}
-      >
-        Aceita
-      </Text>
-    </View>
-  )}
+                        <Text
+                          style={[
+                            styles.statusText,
+                            {
+                              color: "#155724",
+                            },
+                          ]}
+                        >
+                          Aceita
+                        </Text>
+                      </View>
+                    )}
 
-  {item.status === "FINALIZADA" && (
-    <View
-      style={[
-        styles.statusBadge,
-        { backgroundColor: "#E2F0D9" },
-      ]}
-    >
-      <Feather
-        name="check-circle"
-        size={12}
-        color="#155724"
-      />
+                    {item.status === "FINALIZADA" && (
+                      <View
+                        style={[
+                          styles.statusBadge,
+                          {
+                            backgroundColor:
+                              "#E2F0D9",
+                          },
+                        ]}
+                      >
+                        <Feather
+                          name="check-circle"
+                          size={12}
+                          color="#155724"
+                        />
 
-      <Text
-        style={[
-          styles.statusText,
-          { color: "#155724" },
-        ]}
-      >
-        Finalizada
-      </Text>
-    </View>
-  )}
+                        <Text
+                          style={[
+                            styles.statusText,
+                            {
+                              color: "#155724",
+                            },
+                          ]}
+                        >
+                          Finalizada
+                        </Text>
+                      </View>
+                    )}
 
-  {item.status === "RECUSADA" && (
-    <View
-      style={[
-        styles.statusBadge,
-        { backgroundColor: "#F8D7DA" },
-      ]}
-    >
-      <Feather
-        name="x-circle"
-        size={12}
-        color="#721C24"
-      />
+                    {item.status === "RECUSADA" && (
+                      <View
+                        style={[
+                          styles.statusBadge,
+                          {
+                            backgroundColor:
+                              "#F8D7DA",
+                          },
+                        ]}
+                      >
+                        <Feather
+                          name="x-circle"
+                          size={12}
+                          color="#721C24"
+                        />
 
-      <Text
-        style={[
-          styles.statusText,
-          { color: "#721C24" },
-        ]}
-      >
-        Recusada
-      </Text>
-    </View>
-  )}
-  
-                   
-      {/* PRODUTOS */}
+                        <Text
+                          style={[
+                            styles.statusText,
+                            {
+                              color: "#721C24",
+                            },
+                          ]}
+                        >
+                          Recusada
+                        </Text>
+                      </View>
+                    )}
                   </View>
 
                   {/* PRODUTOS */}
@@ -575,8 +564,6 @@ console.log("CHAVES DA RESPOSTA:", Object.keys(data || {}));
                         {item.meuProduto}
                       </Text>
                     </View>
-
-                     
 
                     <Feather
                       name="repeat"
@@ -660,20 +647,22 @@ console.log("CHAVES DA RESPOSTA:", Object.keys(data || {}));
                       </View>
                     )}
 
-                  {item.status ===
-                    "ACEITA" && (
+                  {item.status === "ACEITA" && (
                     <TouchableOpacity
                       style={
                         styles.chatActionButton
                       }
-                     onPress={() =>
-                      router.push({
-                        pathname: "/mensagens/chat",
-                        params: {
-                          id_proposta: String(item.id),
-                        },
-                      } as any)
-                    }
+                      onPress={() =>
+                        router.push({
+                          pathname:
+                            "/mensagens/chat",
+                          params: {
+                            id_proposta: String(
+                              item.id
+                            ),
+                          },
+                        } as any)
+                      }
                     >
                       <Feather
                         name="message-square"
@@ -694,8 +683,7 @@ console.log("CHAVES DA RESPOSTA:", Object.keys(data || {}));
                     </TouchableOpacity>
                   )}
 
-                  {item.status ===
-                    "RECUSADA" && (
+                  {item.status === "RECUSADA" && (
                     <View
                       style={
                         styles.rejectedInfoBox
@@ -716,88 +704,11 @@ console.log("CHAVES DA RESPOSTA:", Object.keys(data || {}));
           )}
         </View>
       </ScrollView>
-
-      {/* BARRA DE NAVEGAÇÃO */}
-      <View style={styles.bottomNav}>
-        <TouchableOpacity
-          style={styles.navItem}
-          onPress={() =>
-            router.replace("/")
-          }
-        >
-          <Feather
-            name="home"
-            size={24}
-            color="#777777"
-          />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.navItem}
-          onPress={() =>
-            router.replace(
-              "/mensagens" as any
-            )
-          }
-        >
-          <Feather
-            name="message-square"
-            size={24}
-            color="#777777"
-          />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.navItemCenter}
-          onPress={() =>
-            router.replace(
-              "/announce" as any
-            )
-          }
-        >
-          <Feather
-            name="plus"
-            size={26}
-            color="#FFFFFF"
-          />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.navItem}
-          onPress={() =>
-            router.replace(
-              "/trocas" as any
-            )
-          }
-        >
-          <Feather
-            name="repeat"
-            size={24}
-            color="#0099FF"
-          />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.navItem}
-          onPress={() =>
-            router.replace(
-              "/perfil" as any
-            )
-          }
-        >
-          <Feather
-            name="user"
-            size={24}
-            color="#777777"
-          />
-        </TouchableOpacity>
-      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-
   mainContainer: {
     flex: 1,
     backgroundColor: "#FFFFFF",
@@ -806,7 +717,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#FFFFFF",
-    marginBottom: 60,
   },
 
   header: {
@@ -1032,39 +942,5 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: "Montserrat_500Medium",
     color: "#888888",
-  },
-
-  bottomNav: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 60,
-    backgroundColor: "#FFFFFF",
-    flexDirection: "row",
-    justifyContent: "space-around",
-    alignItems: "center",
-    borderTopWidth: 1,
-    borderTopColor: "#EEEEEE",
-    elevation: 10,
-    zIndex: 100,
-  },
-
-  navItem: {
-    justifyContent: "center",
-    alignItems: "center",
-    flex: 1,
-    height: "100%",
-  },
-
-  navItemCenter: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#0099FF",
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 10,
-    elevation: 4,
   },
 });

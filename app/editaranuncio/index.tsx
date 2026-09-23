@@ -175,11 +175,21 @@ export default function EditarAnuncioScreen() {
           const caminhoImagem =
             primeiraImagem.ds_imagem;
 
-          setImagemAtual(
-            caminhoImagem.startsWith("http")
-              ? caminhoImagem
-              : `http://127.0.0.1:8000/storage/${caminhoImagem}`
-          );
+const baseUrl =
+  api.defaults.baseURL?.replace(
+    /\/api\/?$/,
+    ""
+  ) || "http://127.0.0.1:8000";
+
+const caminhoLimpo = String(caminhoImagem)
+  .replace(/^\/+/, "")
+  .replace(/^storage\/+/, "");
+
+setImagemAtual(
+  caminhoImagem.startsWith("http")
+    ? caminhoImagem
+    : `${baseUrl}/storage/${caminhoLimpo}`
+);
         }
       }
     } catch (error: any) {

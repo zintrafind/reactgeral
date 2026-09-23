@@ -16,8 +16,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-
-const API_URL = "http://127.0.0.1:8000";
+import api from "../../services/api.js";
 
 type Usuario = {
   id_usuario: number;
@@ -57,7 +56,6 @@ type Chat = {
 
 export default function ChatsListScreen() {
   const router = useRouter();
-
   const [chats, setChats] = useState<Chat[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -73,11 +71,17 @@ export default function ChatsListScreen() {
       return imagePath;
     }
 
+    const baseUrl =
+      api.defaults.baseURL?.replace(
+        /\/api\/?$/,
+        ""
+      ) || "http://127.0.0.1:8000";
+
     const normalizedPath = imagePath
       .replace(/^\/+/, "")
-      .replace(/^storage\//, "");
+      .replace(/^storage\/+/, "");
 
-    return `${API_URL}/storage/${normalizedPath}`;
+    return `${baseUrl}/storage/${normalizedPath}`;
   };
 
   const formatarHora = (
@@ -87,7 +91,9 @@ export default function ChatsListScreen() {
 
     const dataMensagem = new Date(data);
 
-    if (isNaN(dataMensagem.getTime())) return "";
+    if (isNaN(dataMensagem.getTime())) {
+      return "";
+    }
 
     const agora = new Date();
 
@@ -97,10 +103,13 @@ export default function ChatsListScreen() {
       dataMensagem.getFullYear() === agora.getFullYear();
 
     if (mesmaData) {
-      return dataMensagem.toLocaleTimeString("pt-BR", {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
+      return dataMensagem.toLocaleTimeString(
+        "pt-BR",
+        {
+          hour: "2-digit",
+          minute: "2-digit",
+        }
+      );
     }
 
     const ontem = new Date(agora);
@@ -113,16 +122,21 @@ export default function ChatsListScreen() {
 
     if (foiOntem) return "Ontem";
 
-    return dataMensagem.toLocaleDateString("pt-BR", {
-      day: "2-digit",
-      month: "2-digit",
-    });
+    return dataMensagem.toLocaleDateString(
+      "pt-BR",
+      {
+        day: "2-digit",
+        month: "2-digit",
+      }
+    );
   };
 
   const formatarUltimaMensagem = (
     mensagem?: Mensagem
   ): string => {
-    if (!mensagem) return "Nenhuma mensagem ainda";
+    if (!mensagem) {
+      return "Nenhuma mensagem ainda";
+    }
 
     if (
       mensagem.ds_mensagem &&
@@ -131,7 +145,9 @@ export default function ChatsListScreen() {
       return mensagem.ds_mensagem;
     }
 
-    if (mensagem.ds_imagem) return "Imagem";
+    if (mensagem.ds_imagem) {
+      return "Imagem";
+    }
 
     return "Nenhuma mensagem ainda";
   };
@@ -141,10 +157,9 @@ export default function ChatsListScreen() {
     idProposta: number
   ): Promise<Mensagem[]> => {
     try {
-      const response = await fetch(
-        `${API_URL}/api/propostas/${idProposta}/mensagens`,
+      const response = await api.get(
+        `/propostas/${idProposta}/mensagens`,
         {
-          method: "GET",
           headers: {
             Accept: "application/json",
             Authorization: `Bearer ${token}`,
@@ -152,24 +167,17 @@ export default function ChatsListScreen() {
         }
       );
 
-      const data = await response.json();
+      const data = response.data;
 
-      if (!response.ok) {
-        console.error(
-          `Erro ao buscar mensagens da proposta ${idProposta}:`,
-          data?.message
-        );
-
-        return [];
-      }
-
-      return Array.isArray(data.mensagens)
+      return Array.isArray(data?.mensagens)
         ? data.mensagens
         : [];
-    } catch (error) {
+    } catch (error: any) {
       console.error(
         `Erro ao buscar mensagens da proposta ${idProposta}:`,
-        error
+        error?.response?.data?.message ||
+          error?.message ||
+          error
       );
 
       return [];
@@ -248,10 +256,9 @@ export default function ChatsListScreen() {
           return;
         }
 
-        const response = await fetch(
-          `${API_URL}/api/propostas`,
+        const response = await api.get(
+          "/propostas",
           {
-            method: "GET",
             headers: {
               Accept: "application/json",
               Authorization: `Bearer ${token}`,
@@ -259,27 +266,10 @@ export default function ChatsListScreen() {
           }
         );
 
-        const data = await response.json();
-
-        if (!response.ok) {
-          console.error(
-            "Erro ao carregar propostas:",
-            data?.message
-          );
-
-          if (mostrarLoading) {
-            Alert.alert(
-              "Erro",
-              data?.message ||
-                "Não foi possível carregar suas conversas."
-            );
-          }
-
-          return;
-        }
+        const data = response.data;
 
         const propostas: Proposta[] =
-          Array.isArray(data.propostas)
+          Array.isArray(data?.propostas)
             ? data.propostas
             : [];
 
@@ -374,11 +364,9 @@ export default function ChatsListScreen() {
                 );
 
               const ultimaMensagem =
-                mensagensOrdenadas.length >
-                0
+                mensagensOrdenadas.length > 0
                   ? mensagensOrdenadas[
-                      mensagensOrdenadas.length -
-                        1
+                      mensagensOrdenadas.length - 1
                     ]
                   : undefined;
 
@@ -394,30 +382,23 @@ export default function ChatsListScreen() {
                 id: String(
                   proposta.id_proposta
                 ),
-
                 idProposta: Number(
                   proposta.id_proposta
                 ),
-
                 idOutroUsuario,
-
                 usuario:
                   outroUsuario.nm_usuario ||
                   "Usuário",
-
                 avatar: getImageUrl(
                   outroUsuario.ds_foto_perfil
                 ),
-
                 lastMessage:
                   formatarUltimaMensagem(
                     ultimaMensagem
                   ),
-
                 time: formatarHora(
                   ultimaMensagem?.created_at
                 ),
-
                 lastMessageDate:
                   ultimaData,
               };
@@ -487,16 +468,19 @@ export default function ChatsListScreen() {
             return chatsValidos;
           }
         );
-      } catch (error) {
+      } catch (error: any) {
         console.error(
           "Erro ao carregar conversas:",
-          error
+          error?.response?.data?.message ||
+            error?.message ||
+            error
         );
 
         if (mostrarLoading) {
           Alert.alert(
             "Erro",
-            "Não foi possível conectar ao servidor."
+            error?.response?.data?.message ||
+              "Não foi possível conectar ao servidor."
           );
         }
       } finally {
@@ -513,10 +497,9 @@ export default function ChatsListScreen() {
   }, [carregarConversas]);
 
   useEffect(() => {
-    const intervalo =
-      setInterval(() => {
-        carregarConversas(false);
-      }, 5000);
+    const intervalo = setInterval(() => {
+      carregarConversas(false);
+    }, 5000);
 
     return () => {
       clearInterval(intervalo);
@@ -646,76 +629,6 @@ export default function ChatsListScreen() {
           ) : null
         }
       />
-
-      <View style={styles.bottomNav}>
-        <TouchableOpacity
-          style={styles.navItem}
-          onPress={() =>
-            router.replace("/")
-          }
-        >
-          <Feather
-            name="home"
-            size={24}
-            color="#777777"
-          />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.navItem}
-        >
-          <Feather
-            name="message-square"
-            size={24}
-            color="#005386"
-          />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.navItemCenter}
-          onPress={() =>
-            router.push(
-              "/announce" as any
-            )
-          }
-        >
-          <Feather
-            name="plus"
-            size={26}
-            color="#FFFFFF"
-          />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.navItem}
-          onPress={() =>
-            router.push(
-              "/trocas" as any
-            )
-          }
-        >
-          <Feather
-            name="repeat"
-            size={24}
-            color="#777777"
-          />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.navItem}
-          onPress={() =>
-            router.push(
-              "/perfil" as any
-            )
-          }
-        >
-          <Feather
-            name="user"
-            size={24}
-            color="#777777"
-          />
-        </TouchableOpacity>
-      </View>
     </SafeAreaView>
   );
 }
@@ -824,39 +737,5 @@ const styles = StyleSheet.create({
     color: "#999999",
     textAlign: "center",
     lineHeight: 20,
-  },
-
-  bottomNav: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 60,
-    backgroundColor: "#FFFFFF",
-    flexDirection: "row",
-    justifyContent:
-      "space-around",
-    alignItems: "center",
-    borderTopWidth: 1,
-    borderTopColor: "#EEEEEE",
-    elevation: 10,
-  },
-
-  navItem: {
-    justifyContent: "center",
-    alignItems: "center",
-    flex: 1,
-    height: "100%",
-  },
-
-  navItemCenter: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#0099FF",
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 10,
-    elevation: 4,
   },
 });

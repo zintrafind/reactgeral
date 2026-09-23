@@ -51,7 +51,8 @@ export default function ProfileScreen() {
   const [userProducts, setUserProducts] = useState<any[]>([]);
   const [tradedProducts, setTradedProducts] = useState<any[]>([]);
 
-  const [loadingProducts, setLoadingProducts] = useState(true);
+  const [loadingProducts, setLoadingProducts] =
+    useState(true);
 
   // ============================================================
   // ABA ATUAL
@@ -80,6 +81,37 @@ export default function ProfileScreen() {
     useState(false);
 
   // ============================================================
+  // URL DAS IMAGENS
+  // ============================================================
+
+  function getImageUrl(
+    imagePath?: string | null
+  ): string | null {
+    if (!imagePath) {
+      return null;
+    }
+
+    if (
+      imagePath.startsWith("http://") ||
+      imagePath.startsWith("https://")
+    ) {
+      return imagePath;
+    }
+
+    const baseUrl =
+      api.defaults.baseURL?.replace(
+        /\/api\/?$/,
+        ""
+      ) || "http://127.0.0.1:8000";
+
+    const normalizedPath = imagePath
+      .replace(/^\/+/, "")
+      .replace(/^storage\/+/, "");
+
+    return `${baseUrl}/storage/${normalizedPath}`;
+  }
+
+  // ============================================================
   // CARREGAR AO ENTRAR / VOLTAR PARA A TELA
   // ============================================================
 
@@ -97,7 +129,8 @@ export default function ProfileScreen() {
 
   async function carregarUsuario() {
     try {
-      const dados = await AsyncStorage.getItem("usuario");
+      const dados =
+        await AsyncStorage.getItem("usuario");
 
       if (!dados) {
         console.log(
@@ -106,7 +139,8 @@ export default function ProfileScreen() {
         return;
       }
 
-      const usuarioStorage = JSON.parse(dados);
+      const usuarioStorage =
+        JSON.parse(dados);
 
       console.log(
         "USUARIO DO STORAGE:",
@@ -166,14 +200,18 @@ export default function ProfileScreen() {
           idUsuario
         );
 
-        const response = await api.get(
-          `/users/${idUsuario}`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
+        const response =
+          await api.get(
+            `/users/${idUsuario}`,
+            {
+              headers: {
+                Accept:
+                  "application/json",
+                Authorization:
+                  `Bearer ${token}`,
+              },
+            }
+          );
 
         console.log(
           "USUÁRIO RECEBIDO DA API:",
@@ -207,7 +245,9 @@ export default function ProfileScreen() {
 
         await AsyncStorage.setItem(
           "usuario",
-          JSON.stringify(usuarioAtualizado)
+          JSON.stringify(
+            usuarioAtualizado
+          )
         );
 
         console.log(
@@ -243,7 +283,6 @@ export default function ProfileScreen() {
             usuarioAtualizado.ds_banner ||
             null,
         });
-
       } catch (error: any) {
         console.log(
           "ERRO AO BUSCAR USUÁRIO NA API:",
@@ -252,12 +291,8 @@ export default function ProfileScreen() {
             error
         );
 
-        // --------------------------------------------------------
         // Se a API falhar, mantém os dados do storage.
-        // Assim a tela não fica vazia.
-        // --------------------------------------------------------
       }
-
     } catch (erro) {
       console.log(
         "ERRO AO CARREGAR USUÁRIO:",
@@ -289,6 +324,8 @@ export default function ProfileScreen() {
           "/my-products",
           {
             headers: {
+              Accept:
+                "application/json",
               Authorization:
                 `Bearer ${token}`,
             },
@@ -305,14 +342,12 @@ export default function ProfileScreen() {
           ? response.data
           : []
       );
-
     } catch (error: any) {
       console.log(
         "ERRO AO CARREGAR ANÚNCIOS:",
         error?.response?.data ||
           error
       );
-
     } finally {
       setLoadingProducts(false);
     }
@@ -336,6 +371,8 @@ export default function ProfileScreen() {
           "/my-products?status=T",
           {
             headers: {
+              Accept:
+                "application/json",
               Authorization:
                 `Bearer ${token}`,
             },
@@ -352,7 +389,6 @@ export default function ProfileScreen() {
           ? response.data
           : []
       );
-
     } catch (error: any) {
       console.log(
         "ERRO AO CARREGAR ANÚNCIOS TROCADOS:",
@@ -489,6 +525,8 @@ export default function ProfileScreen() {
             `/products/${productId}`,
             {
               headers: {
+                Accept:
+                  "application/json",
                 Authorization:
                   `Bearer ${token}`,
               },
@@ -502,7 +540,6 @@ export default function ProfileScreen() {
 
         await fetchUserProducts();
         await fetchTradedProducts();
-
       } catch (error: any) {
         console.log(
           "STATUS DO ERRO:",
@@ -518,7 +555,6 @@ export default function ProfileScreen() {
           "ERRO COMPLETO:",
           error
         );
-
       } finally {
         setDeleteModalVisible(false);
         setSelectedAd(null);
@@ -564,13 +600,11 @@ export default function ProfileScreen() {
           "Disponível"
         ) {
           statusCodigo = "A";
-
         } else if (
           novoStatus ===
           "Em Negociação"
         ) {
           statusCodigo = "N";
-
         } else if (
           novoStatus === "Trocado"
         ) {
@@ -592,6 +626,8 @@ export default function ProfileScreen() {
           },
           {
             headers: {
+              Accept:
+                "application/json",
               Authorization:
                 `Bearer ${token}`,
             },
@@ -608,7 +644,6 @@ export default function ProfileScreen() {
         console.log(
           `Status do produto ${productId} atualizado para ${statusCodigo}.`
         );
-
       } catch (error: any) {
         console.log(
           "ERRO AO ALTERAR STATUS:",
@@ -635,13 +670,14 @@ export default function ProfileScreen() {
           {},
           {
             headers: {
+              Accept:
+                "application/json",
               Authorization:
                 `Bearer ${token}`,
             },
           }
         );
       }
-
     } catch (erro) {
       console.log(
         "ERRO AO FAZER LOGOUT:",
@@ -661,30 +697,6 @@ export default function ProfileScreen() {
       "/(auth)/login"
     );
   }
-
-  // ============================================================
-  // URL DA FOTO DE PERFIL
-  // ============================================================
-
-  const baseUrl =
-    api.defaults.baseURL?.replace(
-      "/api",
-      ""
-    );
-
-  const fotoPerfilUrl =
-    user.fotoPerfil
-      ? `${baseUrl}/storage/${user.fotoPerfil}`
-      : null;
-
-  // ============================================================
-  // URL DO BANNER
-  // ============================================================
-
-  const bannerUrl =
-    user.banner
-      ? `${baseUrl}/storage/${user.banner}`
-      : null;
 
   // ============================================================
   // PRODUTOS EXIBIDOS
@@ -733,27 +745,29 @@ export default function ProfileScreen() {
     >
       <StatusBar style="dark" />
 
-      {/* ====================================================== */}
       {/* HEADER */}
-      {/* ====================================================== */}
 
       <View style={styles.header}>
-      <TouchableOpacity
-  onPress={() => {
-    if (router.canGoBack()) {
-      router.back();
-    } else {
-      router.replace("/(tabs)");
-    }
-  }}
-  style={styles.headerButton}
->
-  <Feather
-    name="arrow-left"
-    size={24}
-    color="#005386"
-  />
-</TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => {
+            if (router.canGoBack()) {
+              router.back();
+            } else {
+              router.replace(
+                "/(tabs)"
+              );
+            }
+          }}
+          style={
+            styles.headerButton
+          }
+        >
+          <Feather
+            name="arrow-left"
+            size={24}
+            color="#005386"
+          />
+        </TouchableOpacity>
 
         <TouchableOpacity
           onPress={() =>
@@ -773,9 +787,7 @@ export default function ProfileScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* ====================================================== */}
       {/* CONTEÚDO */}
-      {/* ====================================================== */}
 
       <FlatList
         data={displayedProducts}
@@ -795,23 +807,24 @@ export default function ProfileScreen() {
         showsVerticalScrollIndicator={
           false
         }
-
         ListHeaderComponent={
           <View>
-
-            {/* ================================================= */}
             {/* BANNER */}
-            {/* ================================================= */}
 
             <View
               style={
                 styles.bannerContainer
               }
             >
-              {bannerUrl ? (
+              {getImageUrl(
+                user.banner
+              ) ? (
                 <Image
                   source={{
-                    uri: bannerUrl,
+                    uri:
+                      getImageUrl(
+                        user.banner
+                      )!,
                   }}
                   style={
                     styles.bannerImage
@@ -832,9 +845,7 @@ export default function ProfileScreen() {
               )}
             </View>
 
-            {/* ================================================= */}
             {/* DADOS DO USUÁRIO */}
-            {/* ================================================= */}
 
             <View
               style={
@@ -846,10 +857,15 @@ export default function ProfileScreen() {
                   styles.roundAvatar
                 }
               >
-                {fotoPerfilUrl ? (
+                {getImageUrl(
+                  user.fotoPerfil
+                ) ? (
                   <Image
                     source={{
-                      uri: fotoPerfilUrl,
+                      uri:
+                        getImageUrl(
+                          user.fotoPerfil
+                        )!,
                     }}
                     style={
                       styles.profileImage
@@ -931,9 +947,7 @@ export default function ProfileScreen() {
               </View>
             </View>
 
-            {/* ================================================= */}
             {/* AVALIAÇÃO */}
-            {/* ================================================= */}
 
             <View
               style={
@@ -997,9 +1011,7 @@ export default function ProfileScreen() {
               </Text>
             </View>
 
-            {/* ================================================= */}
             {/* ABAS */}
-            {/* ================================================= */}
 
             <ScrollView
               horizontal
@@ -1077,7 +1089,6 @@ export default function ProfileScreen() {
                   )
                 }
               >
-
                 <Text
                   style={
                     styles.tabText
@@ -1089,7 +1100,6 @@ export default function ProfileScreen() {
             </ScrollView>
           </View>
         }
-
         ListEmptyComponent={
           loadingProducts ? (
             <ActivityIndicator
@@ -1109,15 +1119,16 @@ export default function ProfileScreen() {
             </Text>
           )
         }
-
         renderItem={({
           item,
         }) => {
-
           const imagemUrl =
             item.images &&
             item.images.length > 0
-              ? `${baseUrl}/storage/${item.images[0].ds_imagem}`
+              ? getImageUrl(
+                  item.images[0]
+                    ?.ds_imagem
+                )
               : null;
 
           const categoriaNome =
@@ -1231,9 +1242,7 @@ export default function ProfileScreen() {
         }}
       />
 
-      {/* ====================================================== */}
       {/* MODAL DE OPÇÕES */}
-      {/* ====================================================== */}
 
       <Modal
         animationType="fade"
@@ -1390,9 +1399,7 @@ export default function ProfileScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* ====================================================== */}
       {/* MODAL DE STATUS */}
-      {/* ====================================================== */}
 
       <Modal
         animationType="fade"
@@ -1535,9 +1542,7 @@ export default function ProfileScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* ====================================================== */}
       {/* MODAL DE EXCLUSÃO */}
-      {/* ====================================================== */}
 
       <Modal
         animationType="fade"
@@ -1624,9 +1629,7 @@ export default function ProfileScreen() {
         </View>
       </Modal>
 
-      {/* ====================================================== */}
       {/* MODAL DE LOGOUT */}
-      {/* ====================================================== */}
 
       <Modal
         animationType="fade"
@@ -1728,7 +1731,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#fff",
   },
-
   header: {
     height: 60,
     flexDirection: "row",
@@ -1739,16 +1741,13 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#EEEEEE",
   },
-
   headerButton: {
     padding: 6,
   },
-
   listContent: {
     paddingHorizontal: 16,
     paddingBottom: 30,
   },
-
   bannerContainer: {
     width: "100%",
     height: 150,
@@ -1757,13 +1756,11 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     backgroundColor: "#E4F8FF",
   },
-
   bannerImage: {
     width: "100%",
     height: "100%",
     resizeMode: "cover",
   },
-
   bannerPlaceholder: {
     width: "100%",
     height: "100%",
@@ -1771,13 +1768,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "#E4F8FF",
   },
-
   profileInfoContainer: {
     flexDirection: "row",
     alignItems: "center",
     marginTop: 15,
   },
-
   roundAvatar: {
     width: 86,
     height: 86,
@@ -1790,41 +1785,34 @@ const styles = StyleSheet.create({
     elevation: 3,
     overflow: "hidden",
   },
-
   profileImage: {
     width: "100%",
     height: "100%",
     resizeMode: "cover",
   },
-
   userInfoTextContainer: {
     marginLeft: 16,
     flex: 1,
   },
-
   userName: {
     fontFamily: "Montserrat_700Bold",
     fontSize: 19,
     color: "#005386",
   },
-
   addressRow: {
     flexDirection: "row",
     alignItems: "center",
     marginTop: 4,
   },
-
   addressIcon: {
     marginRight: 4,
   },
-
   userSubtext: {
     fontFamily: "Montserrat_400Regular",
     fontSize: 13,
     color: "#777777",
     flex: 1,
   },
-
   editProfileButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -1836,79 +1824,65 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     marginTop: 8,
   },
-
   editProfileText: {
     fontFamily: "Montserrat_600SemiBold",
     fontSize: 11,
     color: "#FFFFFF",
     marginLeft: 5,
   },
-
   ratingContainer: {
     flexDirection: "row",
     alignItems: "center",
     marginTop: 15,
     paddingLeft: 4,
   },
-
   starsRow: {
     flexDirection: "row",
     alignItems: "center",
   },
-
   starIcon: {
     marginRight: 4,
   },
-
   ratingText: {
     fontFamily: "Montserrat_600SemiBold",
     fontSize: 14,
     color: "#005386",
     marginLeft: 8,
   },
-
   tabsContainer: {
     marginVertical: 20,
     borderBottomWidth: 1,
     borderBottomColor: "#eee",
     paddingBottom: 4,
   },
-
   tabItem: {
     marginRight: 24,
     paddingBottom: 8,
     flexDirection: "row",
     alignItems: "center",
   },
-
   favoriteTabItem: {
     marginRight: 8,
   },
-
   favoriteIcon: {
     marginRight: 5,
   },
-
   activeTab: {
     borderBottomWidth: 2,
     borderBottomColor: "#0099FF",
   },
-
   tabText: {
     fontFamily: "Montserrat_500Medium",
     fontSize: 14,
     color: "#888",
   },
-
   activeTabText: {
     fontFamily: "Montserrat_700Bold",
     color: "#005386",
   },
-
   gridRow: {
     justifyContent: "space-between",
   },
-
   listingCard: {
     width: itemWidth,
     marginBottom: 20,
@@ -1919,7 +1893,6 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     elevation: 2,
   },
-
   imagePlaceholder: {
     width: "100%",
     height: itemWidth,
@@ -1927,49 +1900,41 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-
   productImage: {
     width: "100%",
     height: "100%",
     resizeMode: "cover",
   },
-
   textPlaceholderRow: {
     marginTop: 8,
     paddingHorizontal: 8,
     paddingBottom: 8,
   },
-
   listingTitle: {
     fontFamily: "Montserrat_600SemiBold",
     fontSize: 13,
     color: "#333333",
   },
-
   listingCategory: {
     fontFamily: "Montserrat_500Medium",
     fontSize: 11,
     color: "#0099FF",
     marginTop: 3,
   },
-
   cardFooterRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     marginTop: 3,
   },
-
   listingPrice: {
     fontFamily: "Montserrat_400Regular",
     fontSize: 11,
     color: "#777777",
   },
-
   moreOptionsButton: {
     padding: 4,
   },
-
   emptyText: {
     textAlign: "center",
     fontFamily: "Montserrat_400Regular",
@@ -1977,13 +1942,11 @@ const styles = StyleSheet.create({
     marginTop: 40,
     fontSize: 14,
   },
-
   adModalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0, 0, 0, 0.4)",
     justifyContent: "flex-end",
   },
-
   adModalContent: {
     backgroundColor: "#FFFFFF",
     borderTopLeftRadius: 20,
@@ -1991,13 +1954,11 @@ const styles = StyleSheet.create({
     padding: 20,
     alignItems: "center",
   },
-
   adModalTitle: {
     fontFamily: "Montserrat_700Bold",
     fontSize: 16,
     color: "#333333",
   },
-
   adModalSubtitle: {
     fontFamily: "Montserrat_400Regular",
     fontSize: 12,
@@ -2005,7 +1966,6 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     marginTop: 2,
   },
-
   adOptionButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -2016,35 +1976,29 @@ const styles = StyleSheet.create({
     backgroundColor: "#F5FBFF",
     marginBottom: 10,
   },
-
   adOptionText: {
     fontFamily: "Montserrat_600SemiBold",
     fontSize: 15,
     color: "#005386",
     marginLeft: 12,
   },
-
   adOptionDeleteButton: {
     backgroundColor: "#FFF0F0",
   },
-
   adOptionDeleteText: {
     color: "#FF3B30",
   },
-
   adCancelButton: {
     marginTop: 6,
     paddingVertical: 10,
     width: "100%",
     alignItems: "center",
   },
-
   adCancelText: {
     fontFamily: "Montserrat_500Medium",
     fontSize: 14,
     color: "#888888",
   },
-
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0, 0, 0, 0.5)",
@@ -2052,7 +2006,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: 24,
   },
-
   modalContent: {
     width: "100%",
     backgroundColor: "#fff",
@@ -2061,7 +2014,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     elevation: 5,
   },
-
   deleteModalTitle: {
     fontFamily: "Montserrat_700Bold",
     fontSize: 18,
@@ -2069,7 +2021,6 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     textAlign: "center",
   },
-
   deleteModalSubtitle: {
     fontFamily: "Montserrat_400Regular",
     fontSize: 14,
@@ -2078,7 +2029,6 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 24,
   },
-
   logoutModalTitle: {
     fontFamily: "Montserrat_700Bold",
     fontSize: 18,
@@ -2086,7 +2036,6 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     textAlign: "center",
   },
-
   logoutModalSubtitle: {
     fontFamily: "Montserrat_400Regular",
     fontSize: 14,
@@ -2096,13 +2045,11 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     paddingHorizontal: 8,
   },
-
   modalButtonsRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     width: "100%",
   },
-
   cancelLogoutButton: {
     flex: 1,
     height: 44,
@@ -2114,13 +2061,11 @@ const styles = StyleSheet.create({
     marginRight: 12,
     backgroundColor: "#fff",
   },
-
   cancelLogoutText: {
     fontFamily: "Montserrat_600SemiBold",
     fontSize: 14,
     color: "#005386",
   },
-
   confirmDeleteButton: {
     flex: 1,
     height: 44,
@@ -2129,13 +2074,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-
   confirmDeleteText: {
     fontFamily: "Montserrat_700Bold",
     fontSize: 14,
     color: "#fff",
   },
-
   confirmLogoutButton: {
     flex: 1,
     height: 44,
@@ -2144,7 +2087,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-
   confirmLogoutText: {
     fontFamily: "Montserrat_700Bold",
     fontSize: 14,
