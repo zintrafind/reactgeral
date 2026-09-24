@@ -1,7 +1,13 @@
+import { AntDesign, MaterialIcons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as ImagePicker from "expo-image-picker";
+import { router } from "expo-router";
+import { useEffect, useState } from "react";
 import {
   Alert,
   Image,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -9,12 +15,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as ImagePicker from "expo-image-picker";
-import { router } from "expo-router";
-import { useEffect, useState } from "react";
 import api from "../../services/api";
-import { AntDesign, MaterialIcons } from "@expo/vector-icons";
 
 export default function EditarPerfil() {
   const [idUsuario, setIdUsuario] = useState<number | null>(null);
@@ -152,6 +153,34 @@ export default function EditarPerfil() {
     }
   }
 
+  async function adicionarImagem(
+    formData: FormData,
+    campo: string,
+    imagem: ImagePicker.ImagePickerAsset,
+    nomePadrao: string
+  ) {
+    const nomeArquivo = imagem.fileName || nomePadrao;
+
+    if (Platform.OS === "web") {
+      // No navegador, envie os bytes da imagem, não o objeto { uri, name, type }.
+      const resposta = await fetch(imagem.uri);
+
+      if (!resposta.ok) {
+        throw new Error("Não foi possível carregar a imagem selecionada.");
+      }
+
+      const arquivo = await resposta.blob();
+      formData.append(campo, arquivo, nomeArquivo);
+    } else {
+      // Android e iOS usam o formato de arquivo do React Native.
+      formData.append(campo, {
+        uri: imagem.uri,
+        name: nomeArquivo,
+        type: imagem.mimeType || "image/jpeg",
+      } as any);
+    }
+  }
+
   async function salvarAlteracoes() {
     try {
       if (!idUsuario) {
@@ -169,31 +198,21 @@ export default function EditarPerfil() {
       formData.append("ds_usuario", descricao);
 
       if (fotoPerfil) {
-        const nomeArquivo =
-          fotoPerfil.fileName || `foto_perfil_${idUsuario}.jpg`;
-
-        const tipoArquivo =
-          fotoPerfil.mimeType || "image/jpeg";
-
-        formData.append("ds_foto_perfil", {
-          uri: fotoPerfil.uri,
-          name: nomeArquivo,
-          type: tipoArquivo,
-        } as any);
+        await adicionarImagem(
+          formData,
+          "ds_foto_perfil",
+          fotoPerfil,
+          `foto_perfil_${idUsuario}.jpg`
+        );
       }
 
       if (banner) {
-        const nomeArquivo =
-          banner.fileName || `banner_${idUsuario}.jpg`;
-
-        const tipoArquivo =
-          banner.mimeType || "image/jpeg";
-
-        formData.append("ds_banner", {
-          uri: banner.uri,
-          name: nomeArquivo,
-          type: tipoArquivo,
-        } as any);
+        await adicionarImagem(
+          formData,
+          "ds_banner",
+          banner,
+          `banner_${idUsuario}.jpg`
+        );
       }
 
       formData.append("_method", "PUT");
@@ -280,7 +299,7 @@ export default function EditarPerfil() {
       console.log("ERRO AO ATUALIZAR PERFIL");
       console.log("Mensagem:", erro?.message);
       console.log("Status:", erro?.response?.status);
-      console.log("Resposta:", erro?.response?.data);
+      console.log("Resposta:", JSON.stringify(erro?.response?.data, null, 2));
       console.log("=================================");
 
       setTipoModal("erro");

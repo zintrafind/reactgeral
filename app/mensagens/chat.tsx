@@ -9,8 +9,10 @@ import {
   FlatList,
   Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -41,17 +43,20 @@ type ImagemProduto = {
   path?: string | null;
 };
 
+// As listas podem conter caminhos em texto ou objetos com os dados da imagem.
+type ImagemProdutoItem = string | ImagemProduto;
+
 type Produto = {
   id_produto: number;
   id_usuario: number;
   nm_produto: string;
   ds_produto?: string | null;
   ds_imagem?: string | null;
-  imagens?: ImagemProduto[];
-  images?: ImagemProduto[];
-  imagem?: ImagemProduto[];
-  imagem_produto?: ImagemProduto[];
-  imagens_produto?: ImagemProduto[];
+  imagens?: ImagemProdutoItem[];
+  images?: ImagemProdutoItem[];
+  imagem?: ImagemProdutoItem[];
+  imagem_produto?: ImagemProdutoItem[];
+  imagens_produto?: ImagemProdutoItem[];
 };
 
 type ItemProposta = {
@@ -75,6 +80,7 @@ type Proposta = {
 };
 
 const API_URL = "http://127.0.0.1:8000";
+
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 
 const ALLOWED_IMAGE_TYPES = [
@@ -94,24 +100,60 @@ export default function ChatScreen() {
     : "";
 
   const flatListRef = useRef<FlatList<Message>>(null);
+
   const initialScrollDone = useRef(false);
-  const scrollTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  const scrollTimers = useRef<
+    ReturnType<typeof setTimeout>[]
+  >([]);
 
   const [inputText, setInputText] = useState("");
+
   const [messages, setMessages] = useState<Message[]>([]);
+
   const [loadingMessages, setLoadingMessages] = useState(true);
+
   const [sendingMessage, setSendingMessage] = useState(false);
-  const [usuarioLogado, setUsuarioLogado] = useState<number | null>(null);
-  const [idOutroUsuario, setIdOutroUsuario] = useState<number | null>(null);
+
+  const [usuarioLogado, setUsuarioLogado] = useState<
+    number | null
+  >(null);
+
+  const [idOutroUsuario, setIdOutroUsuario] = useState<
+    number | null
+  >(null);
+
   const [nomeOutroUsuario, setNomeOutroUsuario] = useState("");
-  const [fotoOutroUsuario, setFotoOutroUsuario] = useState<string | null>(null);
+
+  const [fotoOutroUsuario, setFotoOutroUsuario] = useState<
+    string | null
+  >(null);
+
   const [idProduto, setIdProduto] = useState<number | null>(null);
+
   const [nomeProduto, setNomeProduto] = useState("");
-  const [fotoProduto, setFotoProduto] = useState<string | null>(null);
+
+  const [fotoProduto, setFotoProduto] = useState<
+    string | null
+  >(null);
 
   const [tradeStatus, setTradeStatus] = useState<
     "em_andamento" | "confirmada_por_mim" | "concluida"
   >("em_andamento");
+
+  // Estados do modal de confirmação da finalização.
+  const [modalFinalizacaoVisivel, setModalFinalizacaoVisivel] =
+    useState(false);
+
+  const [finalizandoTroca, setFinalizandoTroca] = useState(false);
+
+  const [erroFinalizacao, setErroFinalizacao] = useState("");
+
+  // Bloqueia cliques repetidos antes de o estado atualizar a tela.
+  const finalizandoTrocaRef = useRef(false);
+
+  // Evita que uma consulta antiga sobrescreva o status após confirmar.
+  const versaoStatusRef = useRef(0);
 
   const [imagemSelecionada, setImagemSelecionada] = useState<{
     uri: string;
@@ -171,7 +213,10 @@ export default function ChatScreen() {
       }
 
       for (const imagem of lista) {
-        if (typeof imagem === "string" && imagem.trim()) {
+        if (
+          typeof imagem === "string" &&
+          imagem.trim()
+        ) {
           return getImageUrl(imagem);
         }
 
@@ -243,6 +288,13 @@ export default function ChatScreen() {
       if (!idProposta || usuarioLogado === null) {
         return;
       }
+
+      // Aguarda a requisição de finalização terminar.
+      if (finalizandoTrocaRef.current) {
+        return;
+      }
+
+      const versaoConsulta = versaoStatusRef.current;
 
       try {
         const token = await AsyncStorage.getItem("token");
@@ -319,22 +371,28 @@ export default function ChatScreen() {
           );
         }
 
-        if (proposta.st_troca === "F") {
-          setTradeStatus("concluida");
-        } else {
-          const usuarioEhSolicitante =
-            Number(proposta.id_solicitante) ===
-            Number(usuarioLogado);
-
-          const minhaConfirmacao =
-            usuarioEhSolicitante
-              ? proposta.st_confirmacao_solicitante
-              : proposta.st_confirmacao_destinatario;
-
-          if (minhaConfirmacao === "S") {
-            setTradeStatus("confirmada_por_mim");
+        // Só aplica o status se a consulta ainda for válida.
+        if (
+          !finalizandoTrocaRef.current &&
+          versaoConsulta === versaoStatusRef.current
+        ) {
+          if (proposta.st_troca === "F") {
+            setTradeStatus("concluida");
           } else {
-            setTradeStatus("em_andamento");
+            const usuarioEhSolicitante =
+              Number(proposta.id_solicitante) ===
+              Number(usuarioLogado);
+
+            const minhaConfirmacao =
+              usuarioEhSolicitante
+                ? proposta.st_confirmacao_solicitante
+                : proposta.st_confirmacao_destinatario;
+
+            if (minhaConfirmacao === "S") {
+              setTradeStatus("confirmada_por_mim");
+            } else {
+              setTradeStatus("em_andamento");
+            }
           }
         }
 
@@ -461,6 +519,14 @@ export default function ChatScreen() {
     idProposta,
     carregarDadosProposta,
   ]);
+
+  // Se a confirmação já foi registrada, fecha o modal.
+  useEffect(() => {
+    if (tradeStatus !== "em_andamento") {
+      setModalFinalizacaoVisivel(false);
+      setErroFinalizacao("");
+    }
+  }, [tradeStatus]);
 
   const carregarMensagens = useCallback(
     async (mostrarLoading = false) => {
@@ -655,6 +721,9 @@ export default function ChatScreen() {
     );
 
     scrollTimers.current = [];
+
+    setModalFinalizacaoVisivel(false);
+    setErroFinalizacao("");
   }, [idProposta]);
 
   useEffect(() => {
@@ -1150,7 +1219,7 @@ export default function ChatScreen() {
         text:
           data.mensagem.ds_mensagem ||
           (imagemSelecionada
-            ? "📷 Imagem enviada"
+            ? "Imagem enviada"
             : null),
         image: getImageUrl(
           data.mensagem.ds_imagem
@@ -1224,21 +1293,52 @@ export default function ChatScreen() {
     }
   };
 
-  const handleFinalizeTrade = async () => {
+  // Abre apenas o modal. Não envia a finalização para a API.
+  const abrirModalFinalizacao = () => {
     if (
-      tradeStatus === "concluida" ||
-      tradeStatus === "confirmada_por_mim"
+      tradeStatus !== "em_andamento" ||
+      finalizandoTrocaRef.current
     ) {
       return;
     }
+
+    setErroFinalizacao("");
+    setModalFinalizacaoVisivel(true);
+  };
+
+  // Cancelar ou voltar no Android apenas fecha o modal.
+  const fecharModalFinalizacao = () => {
+    if (finalizandoTrocaRef.current) {
+      return;
+    }
+
+    setModalFinalizacaoVisivel(false);
+    setErroFinalizacao("");
+  };
+
+  // Esta função é chamada somente pelo botão "Sim, finalizar".
+  const handleFinalizeTrade = async () => {
+    if (
+      !modalFinalizacaoVisivel ||
+      tradeStatus !== "em_andamento" ||
+      finalizandoTrocaRef.current
+    ) {
+      return;
+    }
+
+    finalizandoTrocaRef.current = true;
+
+    versaoStatusRef.current += 1;
+
+    setFinalizandoTroca(true);
+    setErroFinalizacao("");
 
     try {
       const token =
         await AsyncStorage.getItem("token");
 
       if (!token) {
-        Alert.alert(
-          "Não autenticado",
+        setErroFinalizacao(
           "Faça login novamente para finalizar a troca."
         );
 
@@ -1246,8 +1346,7 @@ export default function ChatScreen() {
       }
 
       if (!idProposta) {
-        Alert.alert(
-          "Erro",
+        setErroFinalizacao(
           "Não foi possível identificar a proposta desta troca."
         );
 
@@ -1271,14 +1370,15 @@ export default function ChatScreen() {
         await response.json();
 
       if (!response.ok) {
-        Alert.alert(
-          "Não foi possível finalizar",
+        setErroFinalizacao(
           data?.message ||
             "Ocorreu um erro ao finalizar a troca."
         );
 
         return;
       }
+
+      setModalFinalizacaoVisivel(false);
 
       if (
         data?.troca_concluida === true
@@ -1321,10 +1421,12 @@ export default function ChatScreen() {
         error
       );
 
-      Alert.alert(
-        "Erro",
-        "Não foi possível conectar ao servidor."
+      setErroFinalizacao(
+        "Não foi possível confirmar o resultado. Verifique sua conexão e aguarde a atualização do status da troca."
       );
+    } finally {
+      finalizandoTrocaRef.current = false;
+      setFinalizandoTroca(false);
     }
   };
 
@@ -1550,6 +1652,7 @@ export default function ChatScreen() {
             </View>
           </TouchableOpacity>
 
+          {/* Este botão abre o modal, sem finalizar diretamente. */}
           <TouchableOpacity
             style={[
               styles.finishBtn,
@@ -1559,15 +1662,22 @@ export default function ChatScreen() {
                   "confirmada_por_mim"
                 ? styles.finishBtnWaiting
                 : styles.finishBtnActive,
+              finalizandoTroca &&
+                styles.buttonDisabled,
             ]}
-            onPress={
-              handleFinalizeTrade
-            }
+            onPress={abrirModalFinalizacao}
             disabled={
-              tradeStatus ===
-                "concluida" ||
-              tradeStatus ===
-                "confirmada_por_mim"
+              tradeStatus === "concluida" ||
+              tradeStatus === "confirmada_por_mim" ||
+              finalizandoTroca
+            }
+            accessibilityRole="button"
+            accessibilityLabel={
+              tradeStatus === "concluida"
+                ? "Troca concluída"
+                : tradeStatus === "confirmada_por_mim"
+                ? "Você já confirmou a troca"
+                : "Finalizar troca"
             }
           >
             <Feather
@@ -1815,6 +1925,134 @@ export default function ChatScreen() {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+
+      {/* Modal de confirmação antes de registrar a finalização. */}
+      <Modal
+        visible={modalFinalizacaoVisivel}
+        transparent
+        animationType="fade"
+        onRequestClose={fecharModalFinalizacao}
+      >
+        <View style={styles.modalOverlay}>
+          <View
+            style={styles.modalContainer}
+            accessibilityViewIsModal
+          >
+            <ScrollView
+              contentContainerStyle={
+                styles.modalContent
+              }
+              showsVerticalScrollIndicator={false}
+              bounces={false}
+            >
+              <View style={styles.modalIconContainer}>
+                <Feather
+                  name="check-circle"
+                  size={32}
+                  color="#0099FF"
+                />
+              </View>
+
+              <Text
+                style={styles.modalTitle}
+                accessibilityRole="header"
+              >
+                Confirmar finalização
+              </Text>
+
+              <Text style={styles.modalDescription}>
+                Tem certeza de que deseja finalizar esta troca?
+              </Text>
+
+              <View style={styles.modalNotice}>
+                <Feather
+                  name="info"
+                  size={18}
+                  color="#005386"
+                />
+
+                <Text style={styles.modalNoticeText}>
+                  Confirme somente se a troca já foi realizada.
+                  A troca será concluída quando os dois usuários
+                  confirmarem.
+                </Text>
+              </View>
+
+              {erroFinalizacao ? (
+                <View style={styles.modalErrorContainer}>
+                  <Text
+                    style={styles.modalErrorText}
+                    accessibilityRole="alert"
+                    accessibilityLiveRegion="polite"
+                  >
+                    {erroFinalizacao}
+                  </Text>
+                </View>
+              ) : null}
+
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  style={[
+                    styles.modalCancelButton,
+                    finalizandoTroca &&
+                      styles.buttonDisabled,
+                  ]}
+                  activeOpacity={0.7}
+                  onPress={fecharModalFinalizacao}
+                  disabled={finalizandoTroca}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cancelar finalização"
+                >
+                  <Text style={styles.modalCancelText}>
+                    Cancelar
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.modalConfirmButton,
+                    finalizandoTroca &&
+                      styles.buttonDisabled,
+                  ]}
+                  activeOpacity={0.7}
+                  onPress={handleFinalizeTrade}
+                  disabled={
+                    finalizandoTroca ||
+                    tradeStatus !== "em_andamento"
+                  }
+                  accessibilityRole="button"
+                  accessibilityLabel="Sim, finalizar troca"
+                  accessibilityState={{
+                    disabled:
+                      finalizandoTroca ||
+                      tradeStatus !== "em_andamento",
+                    busy: finalizandoTroca,
+                  }}
+                >
+                  {finalizandoTroca ? (
+                    <ActivityIndicator
+                      size="small"
+                      color="#FFFFFF"
+                    />
+                  ) : (
+                    <Feather
+                      name="check"
+                      size={18}
+                      color="#FFFFFF"
+                    />
+                  )}
+
+                  <Text style={styles.modalConfirmText}>
+                    {finalizandoTroca
+                      ? "Confirmando..."
+                      : "Sim, finalizar"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1824,6 +2062,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#FFFFFF",
   },
+
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -1834,15 +2073,18 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     paddingTop: 40,
   },
+
   backBtn: {
     marginRight: 10,
   },
+
   headerAvatar: {
     width: 40,
     height: 40,
     borderRadius: 20,
     backgroundColor: "#E4F8FF",
   },
+
   headerAvatarFallback: {
     width: 40,
     height: 40,
@@ -1851,19 +2093,23 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
+
   headerInfo: {
     flex: 1,
     marginLeft: 12,
   },
+
   headerName: {
     fontSize: 15,
     fontFamily: "Montserrat_600SemiBold",
     color: "#005386",
   },
+
   headerStatus: {
     fontSize: 12,
     color: "#777777",
   },
+
   productBanner: {
     flexDirection: "row",
     alignItems: "center",
@@ -1872,18 +2118,21 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#E5E5E5",
   },
+
   productClickable: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
     minWidth: 0,
   },
+
   bannerImage: {
     width: 55,
     height: 55,
     borderRadius: 8,
     backgroundColor: "#DDDDDD",
   },
+
   bannerImageFallback: {
     width: 55,
     height: 55,
@@ -1892,25 +2141,30 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
+
   bannerInfo: {
     flex: 1,
     marginLeft: 10,
     marginRight: 8,
   },
+
   bannerLabel: {
     fontSize: 11,
     color: "#777777",
   },
+
   bannerTitle: {
     fontSize: 13,
     fontFamily: "Montserrat_600SemiBold",
     color: "#005386",
   },
+
   bannerHint: {
     fontSize: 10,
     color: "#999999",
     marginTop: 2,
   },
+
   finishBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -1919,88 +2173,107 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     gap: 4,
   },
+
   finishBtnActive: {
     backgroundColor: "#0099FF",
   },
+
   finishBtnWaiting: {
     backgroundColor: "#777777",
   },
+
   finishBtnDone: {
     backgroundColor: "#28A745",
   },
+
   finishBtnText: {
     color: "#FFFFFF",
     fontSize: 12,
     fontFamily: "Montserrat_600SemiBold",
   },
+
   chatContainer: {
     padding: 16,
     paddingBottom: 180,
   },
+
   messageBubble: {
     maxWidth: "75%",
     padding: 8,
     borderRadius: 14,
     marginVertical: 6,
   },
+
   myMessage: {
     backgroundColor: "#0099FF",
     alignSelf: "flex-end",
     borderBottomRightRadius: 2,
   },
+
   otherMessage: {
     backgroundColor: "#F0F2F5",
     alignSelf: "flex-start",
     borderBottomLeftRadius: 2,
   },
+
   messageImage: {
     width: 220,
     height: 220,
     borderRadius: 10,
     marginBottom: 4,
   },
+
   messageText: {
     fontSize: 14,
     flexShrink: 1,
   },
+
   myMessageText: {
     color: "#FFFFFF",
   },
+
   otherMessageText: {
     color: "#333333",
   },
+
   messageTime: {
     fontSize: 10,
     marginLeft: 8,
     marginTop: 3,
   },
+
   myMessageTime: {
     color: "#D9F1FF",
   },
+
   otherMessageTime: {
     color: "#777777",
   },
+
   systemMessageBubble: {
-    backgroundColor: "#FFE5E5",
+    backgroundColor: "#E8F5E9",
     padding: 10,
     borderRadius: 8,
     alignSelf: "center",
     marginVertical: 10,
     borderWidth: 1,
-    borderColor: "#F1BDBD",
+    borderColor: "#A5D6A7",
   },
+
   systemMessageText: {
-    color: "#D9534F",
+    color: "#2E7D32",
     fontSize: 12,
     textAlign: "center",
     fontFamily: "Montserrat_600SemiBold",
   },
+
   emptyMessages: {
     textAlign: "center",
     color: "#777777",
     fontSize: 14,
     marginTop: 30,
   },
+
   imagePreviewContainer: {
     position: "absolute",
     left: 16,
@@ -2021,17 +2294,20 @@ const styles = StyleSheet.create({
     },
     zIndex: 20,
   },
+
   imagePreview: {
     width: "100%",
     height: "85%",
     borderRadius: 9,
   },
+
   imagePreviewName: {
     fontSize: 9,
     color: "#777777",
     textAlign: "center",
     marginTop: 2,
   },
+
   removeImageButton: {
     position: "absolute",
     top: -8,
@@ -2044,6 +2320,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     zIndex: 30,
   },
+
   inputContainer: {
     position: "absolute",
     left: 0,
@@ -2058,6 +2335,7 @@ const styles = StyleSheet.create({
     zIndex: 10,
     elevation: 20,
   },
+
   imageButton: {
     width: 40,
     height: 40,
@@ -2067,9 +2345,11 @@ const styles = StyleSheet.create({
     marginRight: 6,
     backgroundColor: "#F4F8FB",
   },
+
   imageButtonDisabled: {
     opacity: 0.5,
   },
+
   textInput: {
     flex: 1,
     minHeight: 40,
@@ -2082,6 +2362,7 @@ const styles = StyleSheet.create({
     borderColor: "#E5E5E5",
     fontSize: 14,
   },
+
   sendButton: {
     width: 40,
     height: 40,
@@ -2091,7 +2372,150 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginLeft: 8,
   },
+
   sendButtonDisabled: {
     opacity: 0.5,
+  },
+
+  // Estilos do modal de confirmação.
+
+  buttonDisabled: {
+    opacity: 0.6,
+  },
+
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 24,
+    paddingVertical: 32,
+  },
+
+  modalContainer: {
+    width: "100%",
+    maxWidth: 420,
+    maxHeight: "90%",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    overflow: "hidden",
+    elevation: 10,
+    shadowColor: "#000000",
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    shadowOffset: {
+      width: 0,
+      height: 5,
+    },
+  },
+
+  modalContent: {
+    padding: 24,
+  },
+
+  modalIconContainer: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: "#E4F8FF",
+    justifyContent: "center",
+    alignItems: "center",
+    alignSelf: "center",
+    marginBottom: 18,
+  },
+
+  modalTitle: {
+    fontSize: 20,
+    fontFamily: "Montserrat_600SemiBold",
+    color: "#005386",
+    textAlign: "center",
+    marginBottom: 12,
+  },
+
+  modalDescription: {
+    fontSize: 15,
+    color: "#555555",
+    textAlign: "center",
+    lineHeight: 23,
+  },
+
+  modalNotice: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    backgroundColor: "#F0F8FF",
+    borderRadius: 12,
+    padding: 14,
+    marginTop: 20,
+    gap: 10,
+  },
+
+  modalNoticeText: {
+    flex: 1,
+    fontSize: 12,
+    color: "#005386",
+    lineHeight: 19,
+  },
+
+  modalErrorContainer: {
+    backgroundColor: "#FFF1F0",
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 14,
+  },
+
+  modalErrorText: {
+    fontSize: 13,
+    color: "#B42318",
+    lineHeight: 19,
+  },
+
+  modalActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    marginTop: 24,
+  },
+
+  modalCancelButton: {
+    flexGrow: 1,
+    flexBasis: 100,
+    minHeight: 48,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#D8E3EB",
+    backgroundColor: "#FFFFFF",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+
+  modalCancelText: {
+    color: "#005386",
+    fontSize: 13,
+    fontFamily: "Montserrat_600SemiBold",
+    textAlign: "center",
+  },
+
+  modalConfirmButton: {
+    flexGrow: 1,
+    flexBasis: 140,
+    minHeight: 48,
+    borderRadius: 10,
+    backgroundColor: "#0099FF",
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    gap: 6,
+  },
+
+  modalConfirmText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontFamily: "Montserrat_600SemiBold",
+    textAlign: "center",
+    flexShrink: 1,
   },
 });
