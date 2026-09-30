@@ -1,13 +1,17 @@
 import { Feather } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import React, {
+  memo,
   useCallback,
   useEffect,
+  useMemo,
+  useRef,
   useState,
 } from "react";
 import {
-  Alert,
+  AppState,
+  type AppStateStatus,
   FlatList,
   Image,
   SafeAreaView,
@@ -16,7 +20,21 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+
 import api from "../../services/api.js";
+
+// ============================================================
+// CONSTANTES
+// ============================================================
+
+const INTERVALO_ATUALIZACAO = 5000;
+const TEMPO_LIMITE_REQUISICAO = 15000;
+const CHATS_CACHE_KEY = "@pecapeca:chats_cache_v1";
+const CACHE_MAX_AGE = 1000 * 60 * 60 * 6; // 6h
+
+// ============================================================
+// TIPOS
+// ============================================================
 
 type Usuario = {
   id_usuario: number;
@@ -26,12 +44,9 @@ type Usuario = {
 
 type Mensagem = {
   id_mensagem: number;
-  id_usuario: number;
-  id_proposta: number;
   ds_mensagem?: string | null;
   ds_imagem?: string | null;
   created_at?: string | null;
-  updated_at?: string | null;
 };
 
 type Proposta = {
@@ -39,8 +54,9 @@ type Proposta = {
   id_solicitante: number;
   id_destinatario: number;
   st_troca: string;
-  solicitante?: Usuario;
-  destinatario?: Usuario;
+  solicitante?: Usuario | null;
+  destinatario?: Usuario | null;
+  ultima_mensagem: Mensagem | null;
 };
 
 type Chat = {
@@ -54,688 +70,649 @@ type Chat = {
   lastMessageDate: number;
 };
 
+// ============================================================
+// HELPERS
+// ============================================================
+
+function getImageUrl(imagePath?: string | null): string | null {
+  if (!imagePath) return null;
+  const path = imagePath.trim();
+  if (!path) return null;
+  if (/^https?:\/\//i.test(path)) return path;
+
+  const baseUrl =
+    api.defaults.baseURL?.replace(/\/api\/?$/, "").replace(/\/$/, "") ||
+    "http://127.0.0.1:8000";
+
+  const normalized = path.replace(/^\/+/, "").replace(/^storage\/+/, "");
+  return `${baseUrl}/storage/${normalized}`;
+}
+
+function dataEmNumero(data?: string | null): number {
+  if (!data) return 0;
+  const v = new Date(data).getTime();
+  return Number.isFinite(v) ? v : 0;
+}
+
+function formatarHora(data?: string | null): string {
+  if (!data) return "";
+  const d = new Date(data);
+  if (Number.isNaN(d.getTime())) return "";
+
+  const agora = new Date();
+
+  if (d.toDateString() === agora.toDateString()) {
+    return d.toLocaleTimeString("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
+  const ontem = new Date(agora);
+  ontem.setDate(ontem.getDate() - 1);
+
+  if (d.toDateString() === ontem.toDateString()) return "Ontem";
+
+  return d.toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+  });
+}
+
+function formatarUltimaMensagem(m?: Mensagem | null): string {
+  if (!m) return "Nenhuma mensagem ainda";
+  if (m.ds_mensagem?.trim()) return m.ds_mensagem;
+  if (m.ds_imagem) return "Imagem";
+  return "Nenhuma mensagem ainda";
+}
+
+function listasIguais(a: Chat[], b: Chat[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i];
+    const y = b[i];
+    if (
+      x.id !== y.id ||
+      x.idProposta !== y.idProposta ||
+      x.idOutroUsuario !== y.idOutroUsuario ||
+      x.usuario !== y.usuario ||
+      x.avatar !== y.avatar ||
+      x.lastMessage !== y.lastMessage ||
+      x.time !== y.time ||
+      x.lastMessageDate !== y.lastMessageDate
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// ============================================================
+// CACHE
+// ============================================================
+
+async function saveCache(chats: Chat[]) {
+  try {
+    await AsyncStorage.setItem(
+      CHATS_CACHE_KEY,
+      JSON.stringify({ ts: Date.now(), data: chats.slice(0, 100) })
+    );
+  } catch {}
+}
+
+async function loadCache(): Promise<Chat[] | null> {
+  try {
+    const raw = await AsyncStorage.getItem(CHATS_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.ts || !Array.isArray(parsed?.data)) return null;
+    if (Date.now() - parsed.ts > CACHE_MAX_AGE) return null;
+    return parsed.data as Chat[];
+  } catch {
+    return null;
+  }
+}
+
+// ============================================================
+// SKELETON
+// ============================================================
+
+const SkeletonChat = memo(function SkeletonChat() {
+  return (
+    <View style={styles.chatItem}>
+      <View style={[styles.avatar, styles.skeletonBlock]} />
+      <View style={styles.chatContent}>
+        <View
+          style={[
+            styles.skeletonLine,
+            { width: "60%", height: 14, marginBottom: 8 },
+          ]}
+        />
+        <View style={[styles.skeletonLine, { width: "85%", height: 12 }]} />
+      </View>
+    </View>
+  );
+});
+
+// ============================================================
+// CHAT ITEM
+// ============================================================
+
+const ChatItem = memo(function ChatItem({
+  item,
+  onPress,
+}: {
+  item: Chat;
+  onPress: (chat: Chat) => void;
+}) {
+  const [failedAvatar, setFailedAvatar] = useState(false);
+
+  const handlePress = useCallback(() => onPress(item), [onPress, item]);
+  const handleAvatarError = useCallback(() => setFailedAvatar(true), []);
+
+  const showAvatar = item.avatar && !failedAvatar;
+
+  return (
+    <TouchableOpacity
+      style={styles.chatItem}
+      activeOpacity={0.7}
+      onPress={handlePress}
+      accessibilityRole="button"
+      accessibilityLabel={`Abrir conversa com ${item.usuario}`}
+    >
+      {showAvatar ? (
+        <Image
+          source={{ uri: item.avatar! }}
+          style={styles.avatar}
+          onError={handleAvatarError}
+          fadeDuration={150}
+        />
+      ) : (
+        <View style={styles.avatarFallback}>
+          <Feather name="user" size={24} color="#005386" />
+        </View>
+      )}
+
+      <View style={styles.chatContent}>
+        <View style={styles.chatHeader}>
+          <Text style={styles.userName} numberOfLines={1}>
+            {item.usuario}
+          </Text>
+          {item.time ? <Text style={styles.timeText}>{item.time}</Text> : null}
+        </View>
+
+        <Text style={styles.lastMessage} numberOfLines={1}>
+          {item.lastMessage}
+        </Text>
+      </View>
+    </TouchableOpacity>
+  );
+});
+
+// ============================================================
+// TELA
+// ============================================================
+
 export default function ChatsListScreen() {
   const router = useRouter();
+
   const [chats, setChats] = useState<Chat[]>([]);
   const [loading, setLoading] = useState(true);
+  const [erro, setErro] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
 
-  const getImageUrl = (
-    imagePath?: string | null
-  ): string | null => {
-    if (!imagePath) return null;
+  const chatsRef = useRef<Chat[]>([]);
+  const usuarioAtualRef = useRef<number | null>(null);
+  const loadingRef = useRef(false);
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
 
-    if (
-      imagePath.startsWith("http://") ||
-      imagePath.startsWith("https://")
-    ) {
-      return imagePath;
-    }
-
-    const baseUrl =
-      api.defaults.baseURL?.replace(
-        /\/api\/?$/,
-        ""
-      ) || "http://127.0.0.1:8000";
-
-    const normalizedPath = imagePath
-      .replace(/^\/+/, "")
-      .replace(/^storage\/+/, "");
-
-    return `${baseUrl}/storage/${normalizedPath}`;
-  };
-
-  const formatarHora = (
-    data?: string | null
-  ): string => {
-    if (!data) return "";
-
-    const dataMensagem = new Date(data);
-
-    if (isNaN(dataMensagem.getTime())) {
-      return "";
-    }
-
-    const agora = new Date();
-
-    const mesmaData =
-      dataMensagem.getDate() === agora.getDate() &&
-      dataMensagem.getMonth() === agora.getMonth() &&
-      dataMensagem.getFullYear() === agora.getFullYear();
-
-    if (mesmaData) {
-      return dataMensagem.toLocaleTimeString(
-        "pt-BR",
-        {
-          hour: "2-digit",
-          minute: "2-digit",
-        }
+  const aplicarChats = useCallback((novos: Chat[], persist = true) => {
+    const ordenados = novos
+      .slice()
+      .sort(
+        (a, b) =>
+          b.lastMessageDate - a.lastMessageDate ||
+          b.idProposta - a.idProposta
       );
-    }
 
-    const ontem = new Date(agora);
-    ontem.setDate(agora.getDate() - 1);
+    if (listasIguais(chatsRef.current, ordenados)) return;
 
-    const foiOntem =
-      dataMensagem.getDate() === ontem.getDate() &&
-      dataMensagem.getMonth() === ontem.getMonth() &&
-      dataMensagem.getFullYear() === ontem.getFullYear();
+    chatsRef.current = ordenados;
+    setChats(ordenados);
 
-    if (foiOntem) return "Ontem";
+    if (persist) saveCache(ordenados);
+  }, []);
 
-    return dataMensagem.toLocaleDateString(
-      "pt-BR",
-      {
-        day: "2-digit",
-        month: "2-digit",
+  // Carrega do cache na montagem
+  useEffect(() => {
+    let ativo = true;
+
+    (async () => {
+      const cached = await loadCache();
+      if (!ativo) return;
+
+      if (cached && cached.length > 0) {
+        chatsRef.current = cached;
+        setChats(cached);
+        setLoading(false);
       }
-    );
-  };
+    })();
 
-  const formatarUltimaMensagem = (
-    mensagem?: Mensagem
-  ): string => {
-    if (!mensagem) {
-      return "Nenhuma mensagem ainda";
-    }
+    return () => {
+      ativo = false;
+    };
+  }, []);
 
-    if (
-      mensagem.ds_mensagem &&
-      mensagem.ds_mensagem.trim() !== ""
-    ) {
-      return mensagem.ds_mensagem;
-    }
+  // Monitora background/foreground
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      appStateRef.current = state;
+    });
+    return () => sub.remove();
+  }, []);
 
-    if (mensagem.ds_imagem) {
-      return "Imagem";
-    }
+  // Busca conversas
+  const carregarConversas = useCallback(
+    async (
+      primeiraCarga: boolean,
+      signal: AbortSignal
+    ): Promise<boolean> => {
+      if (loadingRef.current && !primeiraCarga) return true;
+      loadingRef.current = true;
 
-    return "Nenhuma mensagem ainda";
-  };
+      try {
+        const [token, usuarioStorage] = await Promise.all([
+          AsyncStorage.getItem("token"),
+          AsyncStorage.getItem("usuario"),
+        ]);
 
-  const buscarMensagens = async (
-    token: string,
-    idProposta: number
-  ): Promise<Mensagem[]> => {
-    try {
-      const response = await api.get(
-        `/propostas/${idProposta}/mensagens`,
-        {
+        if (signal.aborted) return true;
+
+        if (!token || !usuarioStorage) {
+          aplicarChats([], false);
+          usuarioAtualRef.current = null;
+          setErro("Faça login novamente para acessar suas mensagens.");
+          return true;
+        }
+
+        let usuario: { id_usuario?: number | string };
+        try {
+          usuario = JSON.parse(usuarioStorage);
+        } catch {
+          aplicarChats([], false);
+          setErro("Os dados do usuário estão inválidos. Faça login novamente.");
+          return true;
+        }
+
+        const idUsuario = Number(usuario?.id_usuario);
+        if (!Number.isFinite(idUsuario) || idUsuario <= 0) {
+          aplicarChats([], false);
+          setErro("Não foi possível identificar o usuário logado.");
+          return true;
+        }
+
+        if (usuarioAtualRef.current !== idUsuario) {
+          usuarioAtualRef.current = idUsuario;
+          aplicarChats([], false);
+          setLoading(true);
+        }
+
+        const response = await api.get("/propostas", {
+          params: { para_chat: 1 },
           headers: {
             Accept: "application/json",
             Authorization: `Bearer ${token}`,
           },
-        }
-      );
+          signal,
+          timeout: TEMPO_LIMITE_REQUISICAO,
+        });
 
-      const data = response.data;
+        if (signal.aborted) return true;
 
-      return Array.isArray(data?.mensagens)
-        ? data.mensagens
-        : [];
-    } catch (error: any) {
-      console.error(
-        `Erro ao buscar mensagens da proposta ${idProposta}:`,
-        error?.response?.data?.message ||
-          error?.message ||
-          error
-      );
-
-      return [];
-    }
-  };
-
-  const carregarConversas = useCallback(
-    async (
-      mostrarLoading = false
-    ): Promise<void> => {
-      try {
-        if (mostrarLoading) {
-          setLoading(true);
+        if (!Array.isArray(response.data?.propostas)) {
+          throw new Error("A API retornou uma lista inválida.");
         }
 
-        const token =
-          await AsyncStorage.getItem("token");
+        const propostas: Proposta[] = response.data.propostas;
+        const novosChats: Chat[] = [];
 
-        const usuarioStorage =
-          await AsyncStorage.getItem("usuario");
+        for (let i = 0; i < propostas.length; i++) {
+          const p = propostas[i];
+          const souSol = Number(p.id_solicitante) === idUsuario;
+          const souDest = Number(p.id_destinatario) === idUsuario;
+          const aceitaOuFinalizada = p.st_troca === "A" || p.st_troca === "F";
 
-        if (!token) {
-          if (mostrarLoading) {
-            Alert.alert(
-              "Não autenticado",
-              "Faça login novamente para acessar suas mensagens."
+          if ((!souSol && !souDest) || !aceitaOuFinalizada) continue;
+
+          const outro = souSol ? p.destinatario : p.solicitante;
+          if (!outro) continue;
+
+          if (!Object.prototype.hasOwnProperty.call(p, "ultima_mensagem")) {
+            throw new Error(
+              "A API não retornou a última mensagem. Confira o PropostaController."
             );
           }
 
-          return;
+          const ult = p.ultima_mensagem;
+          const idProposta = Number(p.id_proposta);
+
+          novosChats.push({
+            id: String(idProposta),
+            idProposta,
+            idOutroUsuario: Number(outro.id_usuario),
+            usuario: outro.nm_usuario || "Usuário",
+            avatar: getImageUrl(outro.ds_foto_perfil),
+            lastMessage: formatarUltimaMensagem(ult),
+            time: formatarHora(ult?.created_at),
+            lastMessageDate: dataEmNumero(ult?.created_at),
+          });
         }
 
-        if (!usuarioStorage) {
-          if (mostrarLoading) {
-            Alert.alert(
-              "Erro",
-              "Não foi possível identificar o usuário logado."
-            );
-          }
-
-          return;
-        }
-
-        let usuario: any;
-
-        try {
-          usuario = JSON.parse(usuarioStorage);
-        } catch (error) {
-          console.error(
-            "Erro ao interpretar usuário:",
-            error
-          );
-
-          if (mostrarLoading) {
-            Alert.alert(
-              "Erro",
-              "Os dados do usuário estão inválidos. Faça login novamente."
-            );
-          }
-
-          return;
-        }
-
-        const idUsuario = Number(
-          usuario?.id_usuario
-        );
-
-        if (!idUsuario) {
-          if (mostrarLoading) {
-            Alert.alert(
-              "Erro",
-              "Não foi possível identificar o usuário logado."
-            );
-          }
-
-          return;
-        }
-
-        const response = await api.get(
-          "/propostas",
-          {
-            headers: {
-              Accept: "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
-
-        const data = response.data;
-
-        const propostas: Proposta[] =
-          Array.isArray(data?.propostas)
-            ? data.propostas
-            : [];
-
-        const propostasComChat =
-          propostas.filter(
-            (proposta: Proposta) => {
-              const souSolicitante =
-                Number(
-                  proposta.id_solicitante
-                ) === idUsuario;
-
-              const souDestinatario =
-                Number(
-                  proposta.id_destinatario
-                ) === idUsuario;
-
-              const trocaAceitaOuFinalizada =
-                proposta.st_troca === "A" ||
-                proposta.st_troca === "F";
-
-              return (
-                (souSolicitante ||
-                  souDestinatario) &&
-                trocaAceitaOuFinalizada
-              );
-            }
-          );
-
-        const chatsPromises =
-          propostasComChat.map(
-            async (
-              proposta: Proposta
-            ): Promise<Chat | null> => {
-              const souSolicitante =
-                Number(
-                  proposta.id_solicitante
-                ) === idUsuario;
-
-              const outroUsuario =
-                souSolicitante
-                  ? proposta.destinatario
-                  : proposta.solicitante;
-
-              if (!outroUsuario) {
-                return null;
-              }
-
-              const idOutroUsuario =
-                Number(
-                  outroUsuario.id_usuario
-                );
-
-              const chatAnterior =
-                chats.find(
-                  (chat: Chat) =>
-                    chat.idProposta ===
-                    Number(
-                      proposta.id_proposta
-                    )
-                );
-
-              const mensagens =
-                await buscarMensagens(
-                  token,
-                  Number(
-                    proposta.id_proposta
-                  )
-                );
-
-              const mensagensOrdenadas =
-                [...mensagens].sort(
-                  (
-                    a: Mensagem,
-                    b: Mensagem
-                  ) => {
-                    const dataA =
-                      a.created_at
-                        ? new Date(
-                            a.created_at
-                          ).getTime()
-                        : 0;
-
-                    const dataB =
-                      b.created_at
-                        ? new Date(
-                            b.created_at
-                          ).getTime()
-                        : 0;
-
-                    return dataA - dataB;
-                  }
-                );
-
-              const ultimaMensagem =
-                mensagensOrdenadas.length > 0
-                  ? mensagensOrdenadas[
-                      mensagensOrdenadas.length - 1
-                    ]
-                  : undefined;
-
-              const ultimaData =
-                ultimaMensagem?.created_at
-                  ? new Date(
-                      ultimaMensagem.created_at
-                    ).getTime()
-                  : chatAnterior?.lastMessageDate ||
-                    0;
-
-              return {
-                id: String(
-                  proposta.id_proposta
-                ),
-                idProposta: Number(
-                  proposta.id_proposta
-                ),
-                idOutroUsuario,
-                usuario:
-                  outroUsuario.nm_usuario ||
-                  "Usuário",
-                avatar: getImageUrl(
-                  outroUsuario.ds_foto_perfil
-                ),
-                lastMessage:
-                  formatarUltimaMensagem(
-                    ultimaMensagem
-                  ),
-                time: formatarHora(
-                  ultimaMensagem?.created_at
-                ),
-                lastMessageDate:
-                  ultimaData,
-              };
-            }
-          );
-
-        const chatsResultado =
-          await Promise.all(
-            chatsPromises
-          );
-
-        const chatsValidos =
-          chatsResultado.filter(
-            (
-              chat
-            ): chat is Chat =>
-              chat !== null
-          );
-
-        chatsValidos.sort(
-          (
-            a: Chat,
-            b: Chat
-          ) =>
-            b.lastMessageDate -
-            a.lastMessageDate
-        );
-
-        setChats(
-          (chatsAtuais: Chat[]) => {
-            const iguais =
-              chatsAtuais.length ===
-                chatsValidos.length &&
-              chatsAtuais.every(
-                (
-                  chat: Chat,
-                  index: number
-                ) => {
-                  const novoChat =
-                    chatsValidos[index];
-
-                  return (
-                    chat.id ===
-                      novoChat.id &&
-                    chat.idProposta ===
-                      novoChat.idProposta &&
-                    chat.idOutroUsuario ===
-                      novoChat.idOutroUsuario &&
-                    chat.usuario ===
-                      novoChat.usuario &&
-                    chat.avatar ===
-                      novoChat.avatar &&
-                    chat.lastMessage ===
-                      novoChat.lastMessage &&
-                    chat.time ===
-                      novoChat.time &&
-                    chat.lastMessageDate ===
-                      novoChat.lastMessageDate
-                  );
-                }
-              );
-
-            if (iguais) {
-              return chatsAtuais;
-            }
-
-            return chatsValidos;
-          }
-        );
+        aplicarChats(novosChats);
+        setErro("");
+        return true;
       } catch (error: any) {
-        console.error(
-          "Erro ao carregar conversas:",
-          error?.response?.data?.message ||
-            error?.message ||
-            error
-        );
+        if (signal.aborted) return true;
 
-        if (mostrarLoading) {
-          Alert.alert(
-            "Erro",
-            error?.response?.data?.message ||
-              "Não foi possível conectar ao servidor."
-          );
+        if (error?.response?.status === 401) {
+          aplicarChats([], false);
+          usuarioAtualRef.current = null;
         }
+
+        const msg =
+          error?.response?.data?.message ||
+          error?.message ||
+          "Não foi possível carregar as conversas.";
+
+        setErro(msg);
+        return false;
       } finally {
-        if (mostrarLoading) {
-          setLoading(false);
-        }
+        loadingRef.current = false;
       }
     },
-    [chats]
+    [aplicarChats]
   );
 
-  useEffect(() => {
-    carregarConversas(true);
+  // Polling inteligente
+  useFocusEffect(
+    useCallback(() => {
+      let ativo = true;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const controller = new AbortController();
+
+      const primeiro = chatsRef.current.length === 0;
+      if (primeiro) setLoading(true);
+      setErro("");
+
+      const executarCiclo = async (primeiraCarga: boolean) => {
+        if (appStateRef.current !== "active") {
+          if (ativo) {
+            timer = setTimeout(
+              () => void executarCiclo(false),
+              INTERVALO_ATUALIZACAO
+            );
+          }
+          return;
+        }
+
+        const sucesso = await carregarConversas(
+          primeiraCarga,
+          controller.signal
+        );
+
+        if (ativo) setLoading(false);
+
+        if (ativo) {
+          const delay = sucesso
+            ? INTERVALO_ATUALIZACAO
+            : INTERVALO_ATUALIZACAO * 2;
+          timer = setTimeout(() => void executarCiclo(false), delay);
+        }
+      };
+
+      void executarCiclo(true);
+
+      return () => {
+        ativo = false;
+        if (timer) clearTimeout(timer);
+        controller.abort();
+      };
+    }, [carregarConversas])
+  );
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    const ctrl = new AbortController();
+    await carregarConversas(false, ctrl.signal);
+    setRefreshing(false);
   }, [carregarConversas]);
 
-  useEffect(() => {
-    const intervalo = setInterval(() => {
-      carregarConversas(false);
-    }, 5000);
+  const handleOpenChat = useCallback(
+    (chat: Chat) => {
+      router.push({
+        pathname: "/mensagens/chat",
+        params: { id_proposta: String(chat.idProposta) },
+      } as any);
+    },
+    [router]
+  );
 
-    return () => {
-      clearInterval(intervalo);
-    };
-  }, [carregarConversas]);
+  const keyExtractor = useCallback((item: Chat) => item.id, []);
+
+  const renderItem = useCallback(
+    ({ item }: { item: Chat }) => (
+      <ChatItem item={item} onPress={handleOpenChat} />
+    ),
+    [handleOpenChat]
+  );
+
+  const skeletonData = useMemo(
+    () => Array.from({ length: 6 }, (_, i) => ({ id: `sk-${i}` })),
+    []
+  );
+
+  const showSkeleton = loading && chats.length === 0;
+  const listData = showSkeleton ? skeletonData : chats;
+
+  const ListEmptyComponent = useMemo(() => {
+    if (showSkeleton) return null;
+
+    return (
+      <View style={styles.emptyContainer}>
+        <Feather
+          name={erro ? "wifi-off" : "message-square"}
+          size={48}
+          color={erro ? "#D8B0AC" : "#B9C7D2"}
+        />
+        <Text style={styles.emptyTitle}>
+          {erro ? "Não foi possível carregar" : "Nenhuma conversa ainda"}
+        </Text>
+        <Text style={styles.emptyText}>
+          {erro || "Suas conversas de trocas aceitas aparecerão aqui."}
+        </Text>
+        {erro ? (
+          <TouchableOpacity
+            onPress={handleRefresh}
+            style={styles.retryButton}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.retryText}>Tentar novamente</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    );
+  }, [showSkeleton, erro, handleRefresh]);
 
   return (
-    <SafeAreaView
-      style={styles.mainContainer}
-    >
+    <SafeAreaView style={styles.mainContainer}>
       <View style={styles.listHeader}>
-        <Text style={styles.title}>
-          Mensagens
-        </Text>
+        <Text style={styles.title}>Mensagens</Text>
+        {chats.length > 0 ? (
+          <Text style={styles.subtitle}>
+            {chats.length} {chats.length === 1 ? "conversa" : "conversas"}
+          </Text>
+        ) : null}
       </View>
 
+      {erro && chats.length > 0 ? (
+        <View style={styles.bannerError}>
+          <Feather name="alert-circle" size={14} color="#A33A32" />
+          <Text style={styles.bannerErrorText}>
+            Sem conexão — tentando novamente...
+          </Text>
+        </View>
+      ) : null}
+
       <FlatList
-        data={chats}
-        keyExtractor={(item) => item.id}
-        renderItem={({
-          item,
-        }: {
-          item: Chat;
-        }) => (
-          <TouchableOpacity
-            style={styles.chatItem}
-            activeOpacity={0.7}
-            onPress={() => {
-              router.push({
-                pathname:
-                  "/mensagens/chat",
-                params: {
-                  id_proposta:
-                    String(
-                      item.idProposta
-                    ),
-                },
-              } as any);
-            }}
-          >
-            {item.avatar ? (
-              <Image
-                source={{
-                  uri: item.avatar,
-                }}
-                style={styles.avatar}
-              />
-            ) : (
-              <View
-                style={
-                  styles.avatarFallback
-                }
-              >
-                <Feather
-                  name="user"
-                  size={24}
-                  color="#005386"
-                />
-              </View>
-            )}
-
-            <View
-              style={styles.chatContent}
-            >
-              <View
-                style={styles.chatHeader}
-              >
-                <Text
-                  style={styles.userName}
-                  numberOfLines={1}
-                >
-                  {item.usuario}
-                </Text>
-
-                {item.time ? (
-                  <Text
-                    style={
-                      styles.timeText
-                    }
-                  >
-                    {item.time}
-                  </Text>
-                ) : null}
-              </View>
-
-              <Text
-                style={styles.lastMessage}
-                numberOfLines={1}
-              >
-                {item.lastMessage}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        )}
+        data={listData}
+        keyExtractor={(item: any) => item.id}
+        renderItem={showSkeleton ? () => <SkeletonChat /> : (renderItem as any)}
         contentContainerStyle={[
           styles.listContainer,
-          chats.length === 0 &&
-            styles.emptyListContainer,
+          listData.length === 0 && styles.emptyListContainer,
         ]}
-        showsVerticalScrollIndicator={
-          false
-        }
-        ListEmptyComponent={
-          !loading ? (
-            <View
-              style={styles.emptyContainer}
-            >
-              <Feather
-                name="message-square"
-                size={45}
-                color="#BBBBBB"
-              />
-
-              <Text
-                style={styles.emptyTitle}
-              >
-                Nenhuma conversa
-              </Text>
-
-              <Text
-                style={styles.emptyText}
-              >
-                Suas conversas de trocas
-                aceitas aparecerão aqui.
-              </Text>
-            </View>
-          ) : null
-        }
+        showsVerticalScrollIndicator={false}
+        ListEmptyComponent={ListEmptyComponent}
+        refreshing={refreshing}
+        onRefresh={handleRefresh}
+        initialNumToRender={8}
+        maxToRenderPerBatch={10}
+        windowSize={9}
+        removeClippedSubviews
       />
     </SafeAreaView>
   );
 }
 
+// ============================================================
+// ESTILOS
+// ============================================================
+
 const styles = StyleSheet.create({
-  mainContainer: {
-    flex: 1,
-    backgroundColor: "#FFFFFF",
-  },
+  mainContainer: { flex: 1, backgroundColor: "#FFFFFF" },
 
   listHeader: {
-    padding: 20,
-    paddingTop: 40,
+    paddingHorizontal: 20,
+    paddingTop: 24,
+    paddingBottom: 12,
+    backgroundColor: "#FFFFFF",
   },
-
   title: {
     fontSize: 28,
-    fontFamily:
-      "Montserrat_700Bold",
+    fontFamily: "Montserrat_700Bold",
     color: "#005386",
   },
-
-  listContainer: {
-    paddingHorizontal: 20,
-    paddingBottom: 80,
+  subtitle: {
+    marginTop: 4,
+    fontSize: 12,
+    color: "#8A9BA8",
+    fontFamily: "Montserrat_400Regular",
   },
 
-  emptyListContainer: {
-    flexGrow: 1,
+  bannerError: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginHorizontal: 20,
+    marginBottom: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: "#FDECEA",
+    borderWidth: 1,
+    borderColor: "#F5C6C0",
   },
+  bannerErrorText: {
+    fontSize: 12,
+    color: "#A33A32",
+    fontFamily: "Montserrat_400Regular",
+  },
+
+  listContainer: { paddingHorizontal: 20, paddingBottom: 80 },
+  emptyListContainer: { flexGrow: 1 },
 
   chatItem: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 15,
+    paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: "#F0F0F0",
+    borderBottomColor: "#F2F5F8",
   },
-
   avatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     backgroundColor: "#E4F8FF",
   },
-
   avatarFallback: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     backgroundColor: "#E4F8FF",
     justifyContent: "center",
     alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#DCEEFA",
   },
-
-  chatContent: {
-    flex: 1,
-    marginLeft: 15,
-  },
-
+  chatContent: { flex: 1, marginLeft: 14 },
   chatHeader: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent:
-      "space-between",
+    justifyContent: "space-between",
     marginBottom: 4,
   },
-
   userName: {
     flex: 1,
-    fontSize: 16,
-    fontFamily:
-      "Montserrat_600SemiBold",
-    color: "#333333",
+    fontSize: 15,
+    fontFamily: "Montserrat_600SemiBold",
+    color: "#1E2B36",
     marginRight: 10,
   },
-
   timeText: {
-    fontSize: 12,
-    color: "#AAAAAA",
+    fontSize: 11,
+    color: "#9BAAB6",
+    fontFamily: "Montserrat_400Regular",
+  },
+  lastMessage: {
+    fontSize: 13,
+    color: "#7A8A96",
+    fontFamily: "Montserrat_400Regular",
   },
 
-  lastMessage: {
-    fontSize: 14,
-    color: "#777777",
-  },
+  skeletonBlock: { backgroundColor: "#EAF3FA" },
+  skeletonLine: { backgroundColor: "#EAF3FA", borderRadius: 4 },
 
   emptyContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     paddingHorizontal: 40,
+    paddingVertical: 80,
+    gap: 8,
   },
-
   emptyTitle: {
-    marginTop: 15,
-    fontSize: 18,
-    fontFamily:
-      "Montserrat_600SemiBold",
-    color: "#555555",
-  },
-
-  emptyText: {
     marginTop: 8,
-    fontSize: 14,
-    color: "#999999",
+    fontSize: 17,
+    fontFamily: "Montserrat_600SemiBold",
+    color: "#4A5A66",
+  },
+  emptyText: {
+    marginTop: 4,
+    fontSize: 13,
+    color: "#9BAAB6",
     textAlign: "center",
     lineHeight: 20,
+    fontFamily: "Montserrat_400Regular",
+  },
+  retryButton: {
+    marginTop: 14,
+    backgroundColor: "#005386",
+    borderRadius: 10,
+    paddingHorizontal: 22,
+    paddingVertical: 12,
+  },
+  retryText: {
+    color: "#FFFFFF",
+    fontFamily: "Montserrat_600SemiBold",
   },
 });

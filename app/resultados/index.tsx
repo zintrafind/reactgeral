@@ -14,14 +14,13 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from "react-native";
-
 import api from "../../services/api";
 
 /* ============================================================
-   TIPOS
+    TIPOS
 ============================================================ */
-
 type Product = {
   id_produto: number;
   id_usuario: number;
@@ -30,11 +29,9 @@ type Product = {
   ds_produto: string | null;
   st_condicao: string;
   st_status: string;
-
   user?: {
     nm_usuario: string;
   };
-
   images?: {
     ds_imagem: string;
   }[];
@@ -51,9 +48,8 @@ type Condition = {
 };
 
 /* ============================================================
-   CATEGORIAS
+    CATEGORIAS
 ============================================================ */
-
 const categories: Category[] = [
   { id: null, name: "Todos" },
   { id: 1, name: "Hardware" },
@@ -68,9 +64,8 @@ const categories: Category[] = [
 ];
 
 /* ============================================================
-   CONDIÇÕES
+    CONDIÇÕES
 ============================================================ */
-
 const conditions: Condition[] = [
   { id: null, name: "Todos" },
   { id: "N", name: "Novo" },
@@ -80,9 +75,8 @@ const conditions: Condition[] = [
 ];
 
 /* ============================================================
-   NOMES DAS CONDIÇÕES
+    NOMES DAS CONDIÇÕES
 ============================================================ */
-
 const conditionNames: Record<string, string> = {
   N: "Novo",
   S: "Semi-novo",
@@ -91,11 +85,15 @@ const conditionNames: Record<string, string> = {
 };
 
 /* ============================================================
-   TELA
+    TELA
 ============================================================ */
-
 export default function ResultadosScreen() {
   const router = useRouter();
+  const { width } = useWindowDimensions();
+  const columns = width >= 1100 ? 4 : width >= 700 ? 3 : 2;
+  const cardWidth = (width - 32 - (columns - 1) * 12) / columns;
+  
+  const categoryButtonWidth = Math.max(1, Math.floor((width - 72) / 3));
 
   const params = useLocalSearchParams<{
     search?: string;
@@ -106,27 +104,21 @@ export default function ResultadosScreen() {
   /* ==========================================================
      ESTADOS
   ========================================================== */
-
   const [searchQuery, setSearchQuery] = useState(
     typeof params.search === "string" ? params.search : ""
   );
-
   const [selectedCategory, setSelectedCategory] = useState<number | null>(
     params.category ? Number(params.category) : null
   );
-
   const [selectedCondition, setSelectedCondition] = useState<string | null>(
     typeof params.condition === "string" ? params.condition : null
   );
-
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [filtersVisible, setFiltersVisible] = useState(false);
-
   const [tempCategory, setTempCategory] = useState<number | null>(
     selectedCategory
   );
-
   const [tempCondition, setTempCondition] = useState<string | null>(
     selectedCondition
   );
@@ -134,7 +126,6 @@ export default function ResultadosScreen() {
   /* ==========================================================
      BUSCAR PRODUTOS
   ========================================================== */
-
   const fetchProducts = useCallback(
     async (
       search: string = searchQuery,
@@ -143,28 +134,22 @@ export default function ResultadosScreen() {
     ) => {
       try {
         setLoading(true);
-
         const requestParams: Record<string, string | number> = {};
-
         if (search.trim()) {
           requestParams.search = search.trim();
         }
-
         if (category !== null) {
           requestParams.category = category;
         }
-
         if (condition !== null) {
           requestParams.condition = condition;
         }
-
         const response = await api.get("/products", {
           params: requestParams,
           headers: {
             Accept: "application/json",
           },
         });
-
         if (Array.isArray(response.data)) {
           setProducts(response.data);
         } else if (Array.isArray(response.data?.products)) {
@@ -179,7 +164,6 @@ export default function ResultadosScreen() {
           "Erro ao buscar produtos:",
           error?.response?.data || error
         );
-
         setProducts([]);
       } finally {
         setLoading(false);
@@ -191,24 +175,19 @@ export default function ResultadosScreen() {
   /* ==========================================================
      CARREGAMENTO INICIAL
   ========================================================== */
-
   useEffect(() => {
     const initialSearch =
       typeof params.search === "string" ? params.search : "";
-
     const initialCategory = params.category
       ? Number(params.category)
       : null;
-
     const initialCondition =
       typeof params.condition === "string"
         ? params.condition
         : null;
-
     setSearchQuery(initialSearch);
     setSelectedCategory(initialCategory);
     setSelectedCondition(initialCondition);
-
     fetchProducts(
       initialSearch,
       initialCategory,
@@ -219,10 +198,8 @@ export default function ResultadosScreen() {
   /* ==========================================================
      PESQUISA
   ========================================================== */
-
   const handleSearch = () => {
     Keyboard.dismiss();
-
     fetchProducts(
       searchQuery,
       selectedCategory,
@@ -233,7 +210,6 @@ export default function ResultadosScreen() {
   /* ==========================================================
      ABRIR FILTROS
   ========================================================== */
-
   const openFilters = () => {
     setTempCategory(selectedCategory);
     setTempCondition(selectedCondition);
@@ -243,12 +219,10 @@ export default function ResultadosScreen() {
   /* ==========================================================
      APLICAR FILTROS
   ========================================================== */
-
   const applyFilters = () => {
     setSelectedCategory(tempCategory);
     setSelectedCondition(tempCondition);
     setFiltersVisible(false);
-
     fetchProducts(
       searchQuery,
       tempCategory,
@@ -259,16 +233,12 @@ export default function ResultadosScreen() {
   /* ==========================================================
      LIMPAR FILTROS
   ========================================================== */
-
   const clearFilters = () => {
     setSelectedCategory(null);
     setSelectedCondition(null);
-
     setTempCategory(null);
     setTempCondition(null);
-
     setFiltersVisible(false);
-
     fetchProducts(
       searchQuery,
       null,
@@ -279,10 +249,8 @@ export default function ResultadosScreen() {
   /* ==========================================================
      LIMPAR BUSCA
   ========================================================== */
-
   const clearSearch = () => {
     setSearchQuery("");
-
     fetchProducts(
       "",
       selectedCategory,
@@ -293,58 +261,49 @@ export default function ResultadosScreen() {
   /* ==========================================================
      URL DA IMAGEM
   ========================================================== */
-
   const getImageUrl = (imagePath?: string | null) => {
     if (!imagePath) {
       return null;
     }
-
     if (
       imagePath.startsWith("http://") ||
       imagePath.startsWith("https://")
     ) {
       return imagePath;
     }
-
     const baseUrl =
       api.defaults.baseURL?.replace(/\/api\/?$/, "") ||
       "http://127.0.0.1:8000";
-
     const normalizedPath = imagePath
       .replace(/^\/+/, "")
       .replace(/^storage\/+/, "");
-
     return `${baseUrl}/storage/${normalizedPath}`;
   };
 
   /* ==========================================================
      CATEGORIA ATUAL
   ========================================================== */
-
   const selectedCategoryName = useMemo(() => {
+    if (selectedCategory === null) return null;
     const category = categories.find(
       (item) => item.id === selectedCategory
     );
-
     return category?.name || null;
   }, [selectedCategory]);
 
   /* ==========================================================
      CONDIÇÃO ATUAL
   ========================================================== */
-
   const selectedConditionName = useMemo(() => {
     if (!selectedCondition) {
       return null;
     }
-
     return conditionNames[selectedCondition] || null;
   }, [selectedCondition]);
 
   /* ==========================================================
      QUANTIDADE DE FILTROS
   ========================================================== */
-
   const activeFilterCount =
     (selectedCategory !== null ? 1 : 0) +
     (selectedCondition !== null ? 1 : 0);
@@ -352,7 +311,6 @@ export default function ResultadosScreen() {
   /* ==========================================================
      ABRIR VISUALIZAÇÃO DO ANÚNCIO
   ========================================================== */
-
   const handleProductPress = (productId: number) => {
     router.push({
       pathname: "/visuanuncios",
@@ -365,7 +323,6 @@ export default function ResultadosScreen() {
   /* ==========================================================
      CARD DO PRODUTO
   ========================================================== */
-
   const renderProduct = ({
     item,
   }: {
@@ -373,78 +330,31 @@ export default function ResultadosScreen() {
   }) => {
     const imagePath = item.images?.[0]?.ds_imagem;
     const imageUrl = getImageUrl(imagePath);
-
     return (
       <TouchableOpacity
-        style={styles.productCard}
-        activeOpacity={0.88}
+        style={[styles.productCard, { width: cardWidth }]}
+        activeOpacity={0.85}
+        accessibilityRole="button"
+        accessibilityLabel={`Ver anúncio: ${item.nm_produto}`}
         onPress={() => handleProductPress(item.id_produto)}
       >
         <View style={styles.imageWrapper}>
           {imageUrl ? (
-            <Image
-              source={{
-                uri: imageUrl,
-              }}
-              style={styles.productImage}
-            />
+            <Image source={{ uri: imageUrl }} style={styles.productImage} resizeMode="cover" />
           ) : (
             <View style={styles.imagePlaceholder}>
-              <Feather
-                name="image"
-                size={30}
-                color="#9AA8B2"
-              />
+              <Feather name="cpu" size={28} color="#005386" />
             </View>
           )}
         </View>
-
         <View style={styles.productInfo}>
-          <Text
-            style={styles.productName}
-            numberOfLines={1}
-          >
-            {item.nm_produto}
+          <Text style={styles.productName} numberOfLines={2}>{item.nm_produto}</Text>
+          <Text style={styles.productSpecs} numberOfLines={1}>
+            {conditionNames[item.st_condicao] || item.st_condicao}
           </Text>
-
-          <Text
-            style={styles.productDescription}
-            numberOfLines={2}
-          >
+          <Text style={styles.productDescription} numberOfLines={2}>
             {item.ds_produto || "Sem descrição"}
           </Text>
-
-          <View style={styles.productFooter}>
-            <View style={styles.conditionBadge}>
-              <Text style={styles.conditionBadgeText}>
-                {conditionNames[item.st_condicao] ||
-                  item.st_condicao}
-              </Text>
-            </View>
-
-            <View style={styles.userContainer}>
-              <Feather
-                name="user"
-                size={12}
-                color="#8A959D"
-              />
-
-              <Text
-                style={styles.userName}
-                numberOfLines={1}
-              >
-                {item.user?.nm_usuario || "Usuário"}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.cardArrow}>
-          <Feather
-            name="chevron-right"
-            size={18}
-            color="#A4B0B7"
-          />
         </View>
       </TouchableOpacity>
     );
@@ -453,11 +363,9 @@ export default function ResultadosScreen() {
   /* ==========================================================
      TELA
   ========================================================== */
-
   return (
     <View style={styles.container}>
       {/* HEADER */}
-
       <View style={styles.header}>
         <TouchableOpacity
           onPress={() => {
@@ -476,36 +384,18 @@ export default function ResultadosScreen() {
             color="#005386"
           />
         </TouchableOpacity>
-
-        <View style={styles.headerTextContainer}>
-          <Text style={styles.headerTitle}>
-            Pesquisar peças
-          </Text>
-
-          <Text style={styles.headerSubtitle}>
-            Encontre a peça que procura
-          </Text>
-        </View>
-      </View>
-
-      {/* ÁREA PRINCIPAL */}
-
-      <View style={styles.content}>
-        {/* BARRA DE PESQUISA */}
-
         <View style={styles.searchContainer}>
           <TextInput
             value={searchQuery}
             onChangeText={setSearchQuery}
             onSubmitEditing={handleSearch}
-            placeholder="Buscar peças, marcas..."
+            placeholder="Buscar no Peça por Peça..."
             placeholderTextColor="#98A3AA"
             style={styles.searchInput}
             returnKeyType="search"
             autoCorrect={false}
             autoCapitalize="none"
           />
-
           {searchQuery.length > 0 && (
             <TouchableOpacity
               onPress={clearSearch}
@@ -519,7 +409,6 @@ export default function ResultadosScreen() {
               />
             </TouchableOpacity>
           )}
-
           <TouchableOpacity
             onPress={handleSearch}
             style={styles.searchButton}
@@ -532,20 +421,18 @@ export default function ResultadosScreen() {
             />
           </TouchableOpacity>
         </View>
+      </View>
 
+      {/* ÁREA PRINCIPAL */}
+      <View style={styles.content}>
         {/* CONTROLES */}
-
         <View style={styles.controlRow}>
-          <View>
-            <Text style={styles.filterLabel}>
-              Explorar
-            </Text>
-
-            <Text style={styles.filterDescription}>
-              Refine sua busca
+          <View style={styles.resultsHeader}>
+            <Text style={styles.resultsTitle}>Peças encontradas</Text>
+            <Text style={styles.resultsText}>
+              {loading ? "Buscando..." : `${products.length} ${products.length === 1 ? "resultado" : "resultados"}`}
             </Text>
           </View>
-
           <TouchableOpacity
             onPress={openFilters}
             style={[
@@ -564,7 +451,6 @@ export default function ResultadosScreen() {
                   : "#005386"
               }
             />
-
             <Text
               style={[
                 styles.filterButtonText,
@@ -574,7 +460,6 @@ export default function ResultadosScreen() {
             >
               Filtros
             </Text>
-
             {activeFilterCount > 0 && (
               <View style={styles.filterCounter}>
                 <Text style={styles.filterCounterText}>
@@ -586,10 +471,10 @@ export default function ResultadosScreen() {
         </View>
 
         {/* FILTROS ATIVOS */}
-
         {(selectedCategoryName ||
           selectedConditionName) && (
           <ScrollView
+            style={{ flexGrow: 0, flexShrink: 0 }}
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={
@@ -603,18 +488,15 @@ export default function ResultadosScreen() {
                   size={12}
                   color="#005386"
                 />
-
                 <Text
                   style={styles.activeFilterTagText}
                   numberOfLines={1}
                 >
                   {selectedCategoryName}
                 </Text>
-
                 <TouchableOpacity
                   onPress={() => {
                     setSelectedCategory(null);
-
                     fetchProducts(
                       searchQuery,
                       null,
@@ -630,7 +512,6 @@ export default function ResultadosScreen() {
                 </TouchableOpacity>
               </View>
             )}
-
             {selectedConditionName && (
               <View style={styles.activeFilterTag}>
                 <Feather
@@ -638,17 +519,14 @@ export default function ResultadosScreen() {
                   size={12}
                   color="#005386"
                 />
-
                 <Text
                   style={styles.activeFilterTagText}
                 >
                   {selectedConditionName}
                 </Text>
-
                 <TouchableOpacity
                   onPress={() => {
                     setSelectedCondition(null);
-
                     fetchProducts(
                       searchQuery,
                       selectedCategory,
@@ -664,7 +542,6 @@ export default function ResultadosScreen() {
                 </TouchableOpacity>
               </View>
             )}
-
             <TouchableOpacity
               onPress={clearFilters}
               style={styles.clearAllFilters}
@@ -677,7 +554,6 @@ export default function ResultadosScreen() {
         )}
 
         {/* RESULTADOS */}
-
         {loading ? (
           <View style={styles.loadingContainer}>
             <View style={styles.loadingIcon}>
@@ -686,17 +562,19 @@ export default function ResultadosScreen() {
                 color="#005386"
               />
             </View>
-
             <Text style={styles.loadingTitle}>
               Buscando peças
             </Text>
-
             <Text style={styles.loadingText}>
               Aguarde um momento...
             </Text>
           </View>
         ) : (
           <FlatList
+            key={`products-${columns}`}
+            numColumns={columns}
+            columnWrapperStyle={styles.gridRow}
+            keyboardShouldPersistTaps="handled"
             data={products}
             keyExtractor={(item) =>
               String(item.id_produto)
@@ -708,24 +586,6 @@ export default function ResultadosScreen() {
                 ? styles.emptyContainer
                 : styles.productsList
             }
-            ListHeaderComponent={
-              products.length > 0 ? (
-                <View style={styles.resultsHeader}>
-                  <View>
-                    <Text style={styles.resultsTitle}>
-                      Peças encontradas
-                    </Text>
-
-                    <Text style={styles.resultsText}>
-                      {products.length}{" "}
-                      {products.length === 1
-                        ? "resultado"
-                        : "resultados"}
-                    </Text>
-                  </View>
-                </View>
-              ) : null
-            }
             ListEmptyComponent={
               <View style={styles.emptyContent}>
                 <View style={styles.emptyIcon}>
@@ -735,17 +595,14 @@ export default function ResultadosScreen() {
                     color="#005386"
                   />
                 </View>
-
                 <Text style={styles.emptyTitle}>
                   Nenhuma peça encontrada
                 </Text>
-
                 <Text style={styles.emptyText}>
                   Não encontramos peças que
                   correspondam à sua pesquisa
                   ou aos filtros selecionados.
                 </Text>
-
                 {(selectedCategory !== null ||
                   selectedCondition !== null ||
                   searchQuery.length > 0) && (
@@ -754,7 +611,6 @@ export default function ResultadosScreen() {
                       setSearchQuery("");
                       setSelectedCategory(null);
                       setSelectedCondition(null);
-
                       fetchProducts(
                         "",
                         null,
@@ -769,7 +625,6 @@ export default function ResultadosScreen() {
                       size={15}
                       color="#FFFFFF"
                     />
-
                     <Text style={styles.emptyButtonText}>
                       Ver todas as peças
                     </Text>
@@ -782,7 +637,6 @@ export default function ResultadosScreen() {
       </View>
 
       {/* MODAL DE FILTROS */}
-
       <Modal
         visible={filtersVisible}
         transparent
@@ -798,21 +652,17 @@ export default function ResultadosScreen() {
               setFiltersVisible(false)
             }
           />
-
           <View style={styles.modalContainer}>
             <View style={styles.modalHandle} />
-
             <View style={styles.modalHeader}>
               <View>
                 <Text style={styles.modalTitle}>
                   Filtros
                 </Text>
-
                 <Text style={styles.modalSubtitle}>
                   Encontre exatamente o que procura
                 </Text>
               </View>
-
               <TouchableOpacity
                 onPress={() =>
                   setFiltersVisible(false)
@@ -827,7 +677,6 @@ export default function ResultadosScreen() {
                 />
               </TouchableOpacity>
             </View>
-
             <ScrollView
               showsVerticalScrollIndicator={false}
               contentContainerStyle={
@@ -835,87 +684,6 @@ export default function ResultadosScreen() {
               }
             >
               {/* CATEGORIA */}
-
-              <View style={styles.modalSection}>
-                <View style={styles.modalSectionHeader}>
-                  <View
-                    style={styles.modalIconContainer}
-                  >
-                    <Feather
-                      name="grid"
-                      size={17}
-                      color="#005386"
-                    />
-                  </View>
-
-                  <View>
-                    <Text
-                      style={
-                        styles.modalSectionTitle
-                      }
-                    >
-                      Categoria
-                    </Text>
-
-                    <Text
-                      style={
-                        styles.modalSectionSubtitle
-                      }
-                    >
-                      Qual tipo de peça você procura?
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.optionsGrid}>
-                  {categories.map((category) => {
-                    const isSelected =
-                      tempCategory === category.id;
-
-                    return (
-                      <TouchableOpacity
-                        key={String(category.id)}
-                        onPress={() =>
-                          setTempCategory(
-                            category.id
-                          )
-                        }
-                        style={[
-                          styles.optionCard,
-                          isSelected &&
-                            styles.optionCardSelected,
-                        ]}
-                        activeOpacity={0.8}
-                      >
-                        <Text
-                          style={[
-                            styles.optionText,
-                            isSelected &&
-                              styles.optionTextSelected,
-                          ]}
-                        >
-                          {category.name}
-                        </Text>
-
-                        {isSelected && (
-                          <View
-                            style={styles.checkIcon}
-                          >
-                            <Feather
-                              name="check"
-                              size={12}
-                              color="#FFFFFF"
-                            />
-                          </View>
-                        )}
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-
-              {/* CONDIÇÃO */}
-
               <View style={styles.modalSection}>
                 <View style={styles.modalSectionHeader}>
                   <View
@@ -927,7 +695,73 @@ export default function ResultadosScreen() {
                       color="#005386"
                     />
                   </View>
+                  <View>
+                    <Text
+                      style={
+                        styles.modalSectionTitle
+                      }
+                    >
+                      Categoria
+                    </Text>
+                    <Text
+                      style={
+                        styles.modalSectionSubtitle
+                      }
+                    >
+                      Qual tipo de peça você procura?
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.optionsGrid}>
+                  {categories.map((category) => {
+                    const isSelected =
+                      tempCategory === category.id;
+                    const isAll = category.id === null;
+                    return (
+                      <TouchableOpacity
+                        key={String(category.id)}
+                        onPress={() =>
+                          setTempCategory(
+                            category.id
+                          )
+                        }
+                        style={[
+                          styles.optionCard,
+                          {
+                            width: isAll ? "100%" : categoryButtonWidth,
+                          },
+                          isSelected && styles.optionCardSelected,
+                        ]}
+                        activeOpacity={0.8}
+                      >
+                        <Text
+                          numberOfLines={2}
+                          style={[
+                            styles.optionText,
+                            isSelected &&
+                              styles.optionTextSelected,
+                          ]}
+                        >
+                          {category.name}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
 
+              {/* CONDIÇÃO */}
+              <View style={styles.modalSection}>
+                <View style={styles.modalSectionHeader}>
+                  <View
+                    style={styles.modalIconContainer}
+                  >
+                    <Feather
+                      name="grid"
+                      size={17}
+                      color="#005386"
+                    />
+                  </View>
                   <View>
                     <Text
                       style={
@@ -936,7 +770,6 @@ export default function ResultadosScreen() {
                     >
                       Estado de conservação
                     </Text>
-
                     <Text
                       style={
                         styles.modalSectionSubtitle
@@ -946,12 +779,10 @@ export default function ResultadosScreen() {
                     </Text>
                   </View>
                 </View>
-
                 <View style={styles.conditionOptions}>
                   {conditions.map((condition) => {
                     const isSelected =
                       tempCondition === condition.id;
-
                     return (
                       <TouchableOpacity
                         key={String(condition.id)}
@@ -982,7 +813,6 @@ export default function ResultadosScreen() {
                             />
                           )}
                         </View>
-
                         <Text
                           style={[
                             styles.conditionOptionText,
@@ -1000,7 +830,6 @@ export default function ResultadosScreen() {
             </ScrollView>
 
             {/* RODAPÉ DO MODAL */}
-
             <View style={styles.modalFooter}>
               <TouchableOpacity
                 onPress={() => {
@@ -1018,7 +847,6 @@ export default function ResultadosScreen() {
                   Limpar
                 </Text>
               </TouchableOpacity>
-
               <TouchableOpacity
                 onPress={applyFilters}
                 style={styles.applyButton}
@@ -1027,7 +855,6 @@ export default function ResultadosScreen() {
                 <Text style={styles.applyButtonText}>
                   Aplicar filtros
                 </Text>
-
                 <Feather
                   name="arrow-right"
                   size={17}
@@ -1043,30 +870,31 @@ export default function ResultadosScreen() {
 }
 
 /* ============================================================
-   ESTILOS
+    ESTILOS
 ============================================================ */
-
 const styles = StyleSheet.create({
+  gridRow: { gap: 12, marginBottom: 14 },
+  productSpecs: {
+    fontFamily: "Montserrat_400Regular", fontSize: 11,
+    color: "#777777", marginVertical: 2,
+  },
   container: {
     flex: 1,
     backgroundColor: "#FFFFFF",
   },
-
   content: {
     flex: 1,
   },
-
   header: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingTop: 52,
     paddingBottom: 15,
     borderBottomWidth: 1,
     borderBottomColor: "#F0F2F4",
     backgroundColor: "#FFFFFF",
   },
-
   backButton: {
     width: 40,
     height: 40,
@@ -1076,49 +904,29 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginRight: 11,
   },
-
-  headerTextContainer: {
-    flex: 1,
-  },
-
-  headerTitle: {
-    fontFamily: "Montserrat_700Bold",
-    fontSize: 22,
-    color: "#005386",
-    letterSpacing: -0.3,
-  },
-
-  headerSubtitle: {
-    fontFamily: "Montserrat_400Regular",
-    fontSize: 11,
-    color: "#8A959D",
-    marginTop: 2,
-  },
-
   searchContainer: {
-    height: 50,
-    marginHorizontal: 20,
-    marginTop: 16,
-    marginBottom: 15,
-    paddingLeft: 14,
-    paddingRight: 5,
-    borderRadius: 15,
+    flex: 1,
+    minWidth: 0,
+    height: 46,
+    paddingLeft: 12,
+    paddingRight: 4,
+    borderRadius: 23,
     borderWidth: 1,
-    borderColor: "#DDE7EC",
+    borderColor: "#005386",
     backgroundColor: "#FFFFFF",
     flexDirection: "row",
     alignItems: "center",
   },
-
   searchInput: {
     flex: 1,
+    minWidth: 0,
     height: "100%",
-    marginLeft: 10,
+    paddingVertical: 0,
+    paddingHorizontal: 0,
     fontFamily: "Montserrat_400Regular",
     fontSize: 13,
-    color: "#24292D",
+    color: "#333333",
   },
-
   clearSearchButton: {
     width: 30,
     height: 30,
@@ -1126,37 +934,22 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginRight: 2,
   },
-
   searchButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 11,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: "#005386",
     alignItems: "center",
     justifyContent: "center",
   },
-
   controlRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
+    paddingTop: 12,
     marginBottom: 7,
   },
-
-  filterLabel: {
-    fontFamily: "Montserrat_700Bold",
-    fontSize: 16,
-    color: "#2D3439",
-  },
-
-  filterDescription: {
-    fontFamily: "Montserrat_400Regular",
-    fontSize: 11,
-    color: "#929CA2",
-    marginTop: 2,
-  },
-
   filterButton: {
     minHeight: 40,
     paddingHorizontal: 13,
@@ -1168,22 +961,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 7,
   },
-
   filterButtonActive: {
     backgroundColor: "#005386",
     borderColor: "#005386",
   },
-
   filterButtonText: {
     fontFamily: "Montserrat_700Bold",
     fontSize: 12,
     color: "#005386",
   },
-
   filterButtonTextActive: {
     color: "#FFFFFF",
   },
-
   filterCounter: {
     minWidth: 19,
     height: 19,
@@ -1192,20 +981,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-
   filterCounterText: {
     fontFamily: "Montserrat_700Bold",
     fontSize: 10,
     color: "#005386",
   },
-
   activeFiltersContainer: {
     paddingHorizontal: 20,
     paddingTop: 4,
     paddingBottom: 8,
     gap: 7,
   },
-
   activeFilterTag: {
     height: 30,
     paddingHorizontal: 9,
@@ -1215,160 +1001,86 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 5,
   },
-
   activeFilterTagText: {
     maxWidth: 150,
     fontFamily: "Montserrat_700Bold",
     fontSize: 10,
     color: "#005386",
   },
-
   clearAllFilters: {
     height: 30,
     paddingHorizontal: 8,
     justifyContent: "center",
   },
-
   clearAllFiltersText: {
     fontFamily: "Montserrat_600SemiBold",
     fontSize: 10,
     color: "#7B858B",
   },
-
   resultsHeader: {
-    paddingTop: 5,
-    marginBottom: 5,
+    flex: 1,
+    marginRight: 12,
   },
-
   resultsTitle: {
     fontFamily: "Montserrat_700Bold",
     fontSize: 15,
     color: "#333A3F",
   },
-
   resultsText: {
     fontFamily: "Montserrat_400Regular",
     fontSize: 11,
     color: "#8B969D",
     marginTop: 2,
   },
-
   productsList: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingTop: 10,
     paddingBottom: 30,
   },
-
   productCard: {
-    flexDirection: "row",
-    alignItems: "stretch",
-    minHeight: 126,
-    padding: 10,
-    marginBottom: 12,
-    borderRadius: 15,
-    borderWidth: 1,
-    borderColor: "#EDF0F2",
     backgroundColor: "#FFFFFF",
-    elevation: 2,
-    shadowColor: "#000000",
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-  },
-
-  imageWrapper: {
-    width: 105,
-    height: 105,
-    borderRadius: 11,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#EEEEEE",
     overflow: "hidden",
-    backgroundColor: "#F4F9FC",
+    elevation: 2,
   },
-
+  imageWrapper: {
+    width: "100%",
+    aspectRatio: 1.4,
+    backgroundColor: "#F5FBFF",
+    overflow: "hidden",
+  },
   productImage: {
     width: "100%",
     height: "100%",
-    resizeMode: "cover",
   },
-
   imagePlaceholder: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#F3F7F9",
+    backgroundColor: "#F5FBFF",
   },
-
   productInfo: {
-    flex: 1,
-    marginLeft: 12,
-    paddingVertical: 2,
-    paddingRight: 5,
+    padding: 10,
+    minHeight: 100,
   },
-
   productName: {
-    fontFamily: "Montserrat_700Bold",
-    fontSize: 15,
-    color: "#24292D",
-    marginBottom: 5,
+    fontFamily: "Montserrat_600SemiBold",
+    fontSize: 13,
+    color: "#333333",
   },
-
   productDescription: {
     fontFamily: "Montserrat_400Regular",
-    fontSize: 11,
-    lineHeight: 17,
-    color: "#68737A",
-    marginBottom: 8,
+    fontSize: 12,
+    color: "#0099FF",
   },
-
-  productFooter: {
-    flex: 1,
-    justifyContent: "flex-end",
-  },
-
-  conditionBadge: {
-    alignSelf: "flex-start",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 7,
-    backgroundColor: "#EAF7FD",
-    marginBottom: 7,
-  },
-
-  conditionBadgeText: {
-    fontFamily: "Montserrat_700Bold",
-    fontSize: 9,
-    color: "#005386",
-  },
-
-  userContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    maxWidth: "90%",
-  },
-
-  userName: {
-    marginLeft: 5,
-    fontFamily: "Montserrat_400Regular",
-    fontSize: 9,
-    color: "#8A959D",
-    flexShrink: 1,
-  },
-
-  cardArrow: {
-    width: 24,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
   loadingContainer: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     paddingBottom: 80,
   },
-
   loadingIcon: {
     width: 48,
     height: 48,
@@ -1378,307 +1090,245 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: 12,
   },
-
   loadingTitle: {
     fontFamily: "Montserrat_700Bold",
     fontSize: 15,
     color: "#333A3F",
   },
-
   loadingText: {
     fontFamily: "Montserrat_400Regular",
     fontSize: 11,
     color: "#8A959D",
     marginTop: 4,
   },
-
+  // Estilos da Lista Vazia adicionados
   emptyContainer: {
     flexGrow: 1,
-    paddingHorizontal: 20,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 24,
+    paddingBottom: 40,
   },
-
   emptyContent: {
-    flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 30,
-    paddingBottom: 70,
+    width: "100%",
   },
-
   emptyIcon: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     backgroundColor: "#EAF7FD",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 17,
+    marginBottom: 16,
   },
-
   emptyTitle: {
     fontFamily: "Montserrat_700Bold",
-    fontSize: 19,
-    color: "#30373B",
+    fontSize: 16,
+    color: "#333A3F",
     textAlign: "center",
-    marginBottom: 8,
+    marginBottom: 6,
   },
-
   emptyText: {
     fontFamily: "Montserrat_400Regular",
-    fontSize: 12,
-    lineHeight: 19,
-    color: "#7E898F",
+    fontSize: 13,
+    color: "#8A959D",
     textAlign: "center",
+    lineHeight: 18,
+    marginBottom: 20,
   },
-
   emptyButton: {
-    marginTop: 20,
-    height: 42,
-    paddingHorizontal: 18,
-    borderRadius: 11,
+    height: 44,
+    paddingHorizontal: 20,
+    borderRadius: 12,
     backgroundColor: "#005386",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 7,
+    gap: 8,
   },
-
   emptyButtonText: {
     fontFamily: "Montserrat_700Bold",
-    fontSize: 11,
+    fontSize: 13,
     color: "#FFFFFF",
   },
-
+  // Estilos do Modal de Filtros
   modalOverlay: {
     flex: 1,
     justifyContent: "flex-end",
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
   },
-
   modalBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(12, 27, 36, 0.48)",
   },
-
   modalContainer: {
-    maxHeight: "88%",
     backgroundColor: "#FFFFFF",
-    borderTopLeftRadius: 26,
-    borderTopRightRadius: 26,
-    paddingTop: 10,
-    overflow: "hidden",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: "85%",
+    paddingBottom: 20,
   },
-
   modalHandle: {
-    alignSelf: "center",
-    width: 38,
+    width: 40,
     height: 4,
     borderRadius: 2,
-    backgroundColor: "#D8E0E4",
-    marginBottom: 15,
+    backgroundColor: "#DDDDDD",
+    alignSelf: "center",
+    marginTop: 10,
   },
-
   modalHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 20,
-    paddingBottom: 16,
+    paddingVertical: 15,
     borderBottomWidth: 1,
     borderBottomColor: "#F0F2F4",
   },
-
   modalTitle: {
     fontFamily: "Montserrat_700Bold",
-    fontSize: 21,
-    color: "#252B2F",
+    fontSize: 18,
+    color: "#333333",
   },
-
   modalSubtitle: {
     fontFamily: "Montserrat_400Regular",
-    fontSize: 10,
-    color: "#8A959D",
-    marginTop: 3,
+    fontSize: 12,
+    color: "#888888",
+    marginTop: 2,
   },
-
   modalClose: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#F4F6F7",
-    alignItems: "center",
-    justifyContent: "center",
+    padding: 5,
   },
-
   modalContent: {
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 25,
+    padding: 20,
   },
-
   modalSection: {
-    marginBottom: 25,
+    marginBottom: 20,
   },
-
   modalSectionHeader: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 14,
+    marginBottom: 12,
+    gap: 10,
   },
-
   modalIconContainer: {
-    width: 38,
-    height: 38,
-    borderRadius: 11,
+    width: 32,
+    height: 32,
+    borderRadius: 8,
     backgroundColor: "#EAF7FD",
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 10,
   },
-
   modalSectionTitle: {
     fontFamily: "Montserrat_700Bold",
     fontSize: 14,
-    color: "#30373B",
+    color: "#333333",
   },
-
   modalSectionSubtitle: {
     fontFamily: "Montserrat_400Regular",
-    fontSize: 9,
-    color: "#8A959D",
-    marginTop: 2,
+    fontSize: 11,
+    color: "#888888",
   },
-
   optionsGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
   },
-
   optionCard: {
-    minHeight: 42,
-    paddingHorizontal: 12,
-    borderRadius: 11,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#E0E6E9",
-    backgroundColor: "#FFFFFF",
-    flexDirection: "row",
+    borderColor: "#E0E0E0",
+    backgroundColor: "#FAFAFA",
     alignItems: "center",
-    justifyContent: "space-between",
-    flexGrow: 1,
-    maxWidth: "100%",
+    justifyContent: "center",
+    marginBottom: 4,
   },
-
   optionCardSelected: {
-    backgroundColor: "#F0F9FD",
+    backgroundColor: "#EAF7FD",
     borderColor: "#005386",
   },
-
   optionText: {
-    fontFamily: "Montserrat_600SemiBold",
-    fontSize: 10,
-    color: "#59646B",
-    flexShrink: 1,
+    fontFamily: "Montserrat_400Regular",
+    fontSize: 12,
+    color: "#555555",
+    textAlign: "center",
   },
-
   optionTextSelected: {
     fontFamily: "Montserrat_700Bold",
     color: "#005386",
   },
-
-  checkIcon: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: "#005386",
-    alignItems: "center",
-    justifyContent: "center",
-    marginLeft: 8,
-  },
-
   conditionOptions: {
     gap: 8,
   },
-
   conditionOption: {
-    height: 46,
-    paddingHorizontal: 13,
-    borderRadius: 11,
-    borderWidth: 1,
-    borderColor: "#E0E6E9",
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#FFFFFF",
-  },
-
-  conditionOptionSelected: {
-    borderColor: "#005386",
-    backgroundColor: "#F0F9FD",
-  },
-
-  radio: {
-    width: 20,
-    height: 20,
+    padding: 12,
     borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: "#C7D0D5",
+    borderWidth: 1,
+    borderColor: "#E0E0E0",
+    backgroundColor: "#FAFAFA",
+  },
+  conditionOptionSelected: {
+    backgroundColor: "#EAF7FD",
+    borderColor: "#005386",
+  },
+  radio: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    borderColor: "#AAAAAA",
     alignItems: "center",
     justifyContent: "center",
     marginRight: 10,
   },
-
   radioSelected: {
     borderColor: "#005386",
   },
-
   radioInner: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
     backgroundColor: "#005386",
   },
-
   conditionOptionText: {
-    fontFamily: "Montserrat_600SemiBold",
-    fontSize: 11,
-    color: "#59646B",
+    fontFamily: "Montserrat_400Regular",
+    fontSize: 13,
+    color: "#555555",
   },
-
   conditionOptionTextSelected: {
     fontFamily: "Montserrat_700Bold",
     color: "#005386",
   },
-
   modalFooter: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
     paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 24,
+    paddingTop: 10,
+    gap: 12,
     borderTopWidth: 1,
     borderTopColor: "#F0F2F4",
-    backgroundColor: "#FFFFFF",
   },
-
   modalClearButton: {
-    height: 48,
-    paddingHorizontal: 20,
+    flex: 1,
+    height: 46,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#DDE4E8",
+    borderColor: "#DDDDDD",
     alignItems: "center",
     justifyContent: "center",
   },
-
   modalClearButtonText: {
     fontFamily: "Montserrat_600SemiBold",
-    fontSize: 11,
-    color: "#657077",
+    fontSize: 13,
+    color: "#666666",
   },
-
   applyButton: {
-    flex: 1,
-    height: 48,
+    flex: 2,
+    height: 46,
     borderRadius: 12,
     backgroundColor: "#005386",
     flexDirection: "row",
@@ -1686,10 +1336,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 8,
   },
-
   applyButtonText: {
     fontFamily: "Montserrat_700Bold",
-    fontSize: 12,
+    fontSize: 13,
     color: "#FFFFFF",
   },
 });

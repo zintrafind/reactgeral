@@ -2,10 +2,18 @@ import { Feather } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, {
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState
+} from "react";
 import {
   ActivityIndicator,
   Alert,
+  AppState,
+  type AppStateStatus,
   FlatList,
   Image,
   KeyboardAvoidingView,
@@ -21,12 +29,17 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+// ============================================================
+// TIPOS
+// ============================================================
+
 type Message = {
   id: string;
   sender: "me" | "other" | "system";
   text?: string | null;
   image?: string | null;
   createdAt?: string;
+  pending?: boolean;
 };
 
 type Usuario = {
@@ -43,7 +56,6 @@ type ImagemProduto = {
   path?: string | null;
 };
 
-// As listas podem conter caminhos em texto ou objetos com os dados da imagem.
 type ImagemProdutoItem = string | ImagemProduto;
 
 type Produto = {
@@ -79,9 +91,24 @@ type Proposta = {
   itens?: ItemProposta[];
 };
 
+// ============================================================
+// CONSTANTES
+// ============================================================
+
 const API_URL = "http://127.0.0.1:8000";
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
+
+const INTERVALO_MENSAGENS_ATIVO = 3000;
+const INTERVALO_MENSAGENS_OCIOSO = 8000;
+
+const INTERVALO_PROPOSTA = 15000;
+
+const MSG_CACHE_PREFIX = "@pecapeca:chat_msgs_v1:";
+const MSG_CACHE_MAX_AGE = 1000 * 60 * 60 * 6; // 6h
+
+const PROD_CACHE_PREFIX = "@pecapeca:prod_v1:";
+const PROD_CACHE_MAX_AGE = 1000 * 60 * 60 * 24; // 24h
 
 const ALLOWED_IMAGE_TYPES = [
   "image/jpeg",
@@ -90,71 +117,297 @@ const ALLOWED_IMAGE_TYPES = [
   "image/webp",
 ];
 
+// ============================================================
+// HELPERS
+// ============================================================
+
+function getImageUrl(imagePath?: string | null): string | null {
+  if (!imagePath) return null;
+  const path = String(imagePath).trim();
+  if (!path) return null;
+  if (path.startsWith("http://") || path.startsWith("https://")) return path;
+
+  const normalized = path.replace(/^\/+/, "").replace(/^storage\/+/, "");
+  return `${API_URL}/storage/${normalized}`;
+}
+
+function getProductImage(produto?: Produto | null): string | null {
+  if (!produto) return null;
+
+  if (typeof produto.ds_imagem === "string" && produto.ds_imagem.trim()) {
+    return getImageUrl(produto.ds_imagem);
+  }
+
+  const listas = [
+    produto.images,
+    produto.imagens,
+    produto.imagem,
+    produto.imagem_produto,
+    produto.imagens_produto,
+  ];
+
+  for (const lista of listas) {
+    if (!Array.isArray(lista) || lista.length === 0) continue;
+
+    for (const img of lista) {
+      if (typeof img === "string" && img.trim()) {
+        return getImageUrl(img);
+      }
+      if (img && typeof img === "object") {
+        const caminho = img.ds_imagem || img.imagem || img.url || img.path;
+        if (typeof caminho === "string" && caminho.trim()) {
+          return getImageUrl(caminho);
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function formatarHora(data?: string): string {
+  if (!data) return "";
+  const d = new Date(data);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+}
+
+function compararMensagens(a: Message, b: Message): number {
+  const da = a.createdAt ? new Date(a.createdAt).getTime() : NaN;
+  const db = b.createdAt ? new Date(b.createdAt).getTime() : NaN;
+  if (!Number.isNaN(da) && !Number.isNaN(db) && da !== db) return da - db;
+  return Number(a.id) - Number(b.id);
+}
+
+function mensagensIguais(a: Message[], b: Message[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (
+      a[i].id !== b[i].id ||
+      a[i].text !== b[i].text ||
+      a[i].image !== b[i].image ||
+      a[i].sender !== b[i].sender
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// ============================================================
+// CACHE — Mensagens
+// ============================================================
+
+async function saveMsgCache(idProposta: string, msgs: Message[]) {
+  try {
+    const key = `${MSG_CACHE_PREFIX}${idProposta}`;
+    await AsyncStorage.setItem(
+      key,
+      JSON.stringify({ ts: Date.now(), data: msgs.slice(-100) })
+    );
+  } catch {}
+}
+
+async function loadMsgCache(idProposta: string): Promise<Message[] | null> {
+  try {
+    const key = `${MSG_CACHE_PREFIX}${idProposta}`;
+    const raw = await AsyncStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.ts || !Array.isArray(parsed?.data)) return null;
+    if (Date.now() - parsed.ts > MSG_CACHE_MAX_AGE) return null;
+    return parsed.data as Message[];
+  } catch {
+    return null;
+  }
+}
+
+// ============================================================
+// CACHE — Produto
+// ============================================================
+
+async function saveProdCache(
+  id: number,
+  dados: { nm_produto: string; imagem: string | null }
+) {
+  try {
+    await AsyncStorage.setItem(
+      `${PROD_CACHE_PREFIX}${id}`,
+      JSON.stringify({ ts: Date.now(), ...dados })
+    );
+  } catch {}
+}
+
+async function loadProdCache(
+  id: number
+): Promise<{ nm_produto: string; imagem: string | null } | null> {
+  try {
+    const raw = await AsyncStorage.getItem(`${PROD_CACHE_PREFIX}${id}`);
+    if (!raw) return null;
+    const p = JSON.parse(raw);
+    if (Date.now() - p.ts > PROD_CACHE_MAX_AGE) return null;
+    return p as { nm_produto: string; imagem: string | null };
+  } catch {
+    return null;
+  }
+}
+
+// ============================================================
+// ITEM DA MENSAGEM (memoizado)
+// ============================================================
+
+const MessageItem = memo(function MessageItem({ item }: { item: Message }) {
+  if (item.sender === "system") {
+    return (
+      <View style={styles.systemMessageBubble}>
+        <Text style={styles.systemMessageText}>{item.text}</Text>
+      </View>
+    );
+  }
+
+  const isMe = item.sender === "me";
+
+  return (
+    <View
+      style={[
+        styles.messageBubble,
+        isMe ? styles.myMessage : styles.otherMessage,
+        item.pending && styles.pendingBubble,
+      ]}
+    >
+      {item.image ? (
+        <Image
+          source={{ uri: item.image }}
+          style={styles.messageImage}
+          resizeMode="cover"
+        />
+      ) : null}
+
+      {item.text ? (
+        <Text
+          style={[
+            styles.messageText,
+            isMe ? styles.myMessageText : styles.otherMessageText,
+          ]}
+        >
+          {item.text}
+        </Text>
+      ) : null}
+
+      <View style={styles.messageFooter}>
+        {item.createdAt ? (
+          <Text
+            style={[
+              styles.messageTime,
+              isMe ? styles.myMessageTime : styles.otherMessageTime,
+            ]}
+          >
+            {formatarHora(item.createdAt)}
+          </Text>
+        ) : null}
+
+        {item.pending ? (
+          <Feather
+            name="clock"
+            size={10}
+            color={isMe ? "#D9F1FF" : "#777777"}
+            style={{ marginLeft: 4 }}
+          />
+        ) : null}
+      </View>
+    </View>
+  );
+});
+
+// ============================================================
+// INPUT MEMOIZADO
+// ============================================================
+
+const ChatInput = memo(function ChatInput({
+  value,
+  onChangeText,
+  onSend,
+  onPickImage,
+  sending,
+  hasImage,
+  bottomSpace,
+}: {
+  value: string;
+  onChangeText: (t: string) => void;
+  onSend: () => void;
+  onPickImage: () => void;
+  sending: boolean;
+  hasImage: boolean;
+  bottomSpace: number;
+}) {
+  const disabledSend = sending || (!value.trim() && !hasImage);
+
+  return (
+    <View style={[styles.inputContainer, { bottom: bottomSpace }]}>
+      <TouchableOpacity
+        style={[styles.imageButton, sending && styles.imageButtonDisabled]}
+        onPress={onPickImage}
+        disabled={sending}
+      >
+        <Feather name="image" size={21} color="#005386" />
+      </TouchableOpacity>
+
+      <TextInput
+        style={styles.textInput}
+        placeholder="Digite sua mensagem..."
+        placeholderTextColor="#888888"
+        value={value}
+        onChangeText={onChangeText}
+        editable={!sending}
+        multiline
+      />
+
+      <TouchableOpacity
+        style={[styles.sendButton, disabledSend && styles.sendButtonDisabled]}
+        onPress={onSend}
+        disabled={disabledSend}
+      >
+        {sending ? (
+          <ActivityIndicator size="small" color="#FFFFFF" />
+        ) : (
+          <Feather name="send" size={18} color="#FFFFFF" />
+        )}
+      </TouchableOpacity>
+    </View>
+  );
+});
+
+// ============================================================
+// TELA
+// ============================================================
+
 export default function ChatScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const insets = useSafeAreaInsets();
 
-  const idProposta = params.id_proposta
-    ? String(params.id_proposta)
-    : "";
+  const idProposta = params.id_proposta ? String(params.id_proposta) : "";
 
   const flatListRef = useRef<FlatList<Message>>(null);
-
   const initialScrollDone = useRef(false);
-
-  const scrollTimers = useRef<
-    ReturnType<typeof setTimeout>[]
-  >([]);
+  const scrollTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   const [inputText, setInputText] = useState("");
-
   const [messages, setMessages] = useState<Message[]>([]);
-
   const [loadingMessages, setLoadingMessages] = useState(true);
-
   const [sendingMessage, setSendingMessage] = useState(false);
-
-  const [usuarioLogado, setUsuarioLogado] = useState<
-    number | null
-  >(null);
-
-  const [idOutroUsuario, setIdOutroUsuario] = useState<
-    number | null
-  >(null);
-
+  const [usuarioLogado, setUsuarioLogado] = useState<number | null>(null);
+  const [idOutroUsuario, setIdOutroUsuario] = useState<number | null>(null);
   const [nomeOutroUsuario, setNomeOutroUsuario] = useState("");
-
-  const [fotoOutroUsuario, setFotoOutroUsuario] = useState<
-    string | null
-  >(null);
-
+  const [fotoOutroUsuario, setFotoOutroUsuario] = useState<string | null>(null);
   const [idProduto, setIdProduto] = useState<number | null>(null);
-
   const [nomeProduto, setNomeProduto] = useState("");
-
-  const [fotoProduto, setFotoProduto] = useState<
-    string | null
-  >(null);
-
+  const [fotoProduto, setFotoProduto] = useState<string | null>(null);
   const [tradeStatus, setTradeStatus] = useState<
     "em_andamento" | "confirmada_por_mim" | "concluida"
   >("em_andamento");
-
-  // Estados do modal de confirmação da finalização.
-  const [modalFinalizacaoVisivel, setModalFinalizacaoVisivel] =
-    useState(false);
-
+  const [modalFinalizacaoVisivel, setModalFinalizacaoVisivel] = useState(false);
   const [finalizandoTroca, setFinalizandoTroca] = useState(false);
-
   const [erroFinalizacao, setErroFinalizacao] = useState("");
-
-  // Bloqueia cliques repetidos antes de o estado atualizar a tela.
-  const finalizandoTrocaRef = useRef(false);
-
-  // Evita que uma consulta antiga sobrescreva o status após confirmar.
-  const versaoStatusRef = useRef(0);
-
   const [imagemSelecionada, setImagemSelecionada] = useState<{
     uri: string;
     name: string;
@@ -162,216 +415,114 @@ export default function ChatScreen() {
     file?: File;
   } | null>(null);
 
-  const getImageUrl = (imagePath?: string | null) => {
-    if (!imagePath) {
-      return null;
-    }
-
-    const path = String(imagePath).trim();
-
-    if (!path) {
-      return null;
-    }
-
-    if (
-      path.startsWith("http://") ||
-      path.startsWith("https://")
-    ) {
-      return path;
-    }
-
-    const normalizedPath = path
-      .replace(/^\/+/, "")
-      .replace(/^storage\/+/, "");
-
-    return `${API_URL}/storage/${normalizedPath}`;
-  };
-
-  const getProductImage = (produto?: Produto | null) => {
-    if (!produto) {
-      return null;
-    }
-
-    if (
-      typeof produto.ds_imagem === "string" &&
-      produto.ds_imagem.trim()
-    ) {
-      return getImageUrl(produto.ds_imagem);
-    }
-
-    const possiveisImagens = [
-      produto.images,
-      produto.imagens,
-      produto.imagem,
-      produto.imagem_produto,
-      produto.imagens_produto,
-    ];
-
-    for (const lista of possiveisImagens) {
-      if (!Array.isArray(lista) || lista.length === 0) {
-        continue;
-      }
-
-      for (const imagem of lista) {
-        if (
-          typeof imagem === "string" &&
-          imagem.trim()
-        ) {
-          return getImageUrl(imagem);
-        }
-
-        if (imagem && typeof imagem === "object") {
-          const caminho =
-            imagem.ds_imagem ||
-            imagem.imagem ||
-            imagem.url ||
-            imagem.path;
-
-          if (
-            typeof caminho === "string" &&
-            caminho.trim()
-          ) {
-            return getImageUrl(caminho);
-          }
-        }
-      }
-    }
-
-    return null;
-  };
-
-  const formatarHora = (data?: string) => {
-    if (!data) {
-      return "";
-    }
-
-    const dataMensagem = new Date(data);
-
-    if (isNaN(dataMensagem.getTime())) {
-      return "";
-    }
-
-    return dataMensagem.toLocaleTimeString("pt-BR", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
+  const finalizandoTrocaRef = useRef(false);
+  const versaoStatusRef = useRef(0);
+  const carregandoPropostaRef = useRef(false);
+  const carregandoMensagensRef = useRef(false);
+  const tokenRef = useRef<string | null>(null);
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const messagesRef = useRef<Message[]>([]);
+  const inputTextRef = useRef("");
 
   useEffect(() => {
-    const carregarUsuarioLogado = async () => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    inputTextRef.current = inputText;
+  }, [inputText]);
+
+  // ==========================================================
+  // USUÁRIO LOGADO + TOKEN
+  // ==========================================================
+  useEffect(() => {
+    let ativo = true;
+
+    (async () => {
       try {
-        const usuarioStorage =
-          await AsyncStorage.getItem("usuario");
+        const [usuarioStorage, token] = await Promise.all([
+          AsyncStorage.getItem("usuario"),
+          AsyncStorage.getItem("token"),
+        ]);
 
-        if (!usuarioStorage) {
-          return;
-        }
+        if (!ativo) return;
+        tokenRef.current = token;
 
+        if (!usuarioStorage) return;
         const usuario = JSON.parse(usuarioStorage);
-
         if (usuario?.id_usuario) {
           setUsuarioLogado(Number(usuario.id_usuario));
         }
-      } catch (error) {
-        console.error(
-          "Erro ao carregar usuário logado:",
-          error
-        );
-      }
-    };
+      } catch {}
+    })();
 
-    carregarUsuarioLogado();
+    return () => {
+      ativo = false;
+    };
   }, []);
 
+  // ==========================================================
+  // AppState
+  // ==========================================================
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      appStateRef.current = state;
+    });
+    return () => sub.remove();
+  }, []);
+
+  // ==========================================================
+  // CARREGAR DADOS DA PROPOSTA
+  // ==========================================================
   const carregarDadosProposta = useCallback(
-    async (mostrarErro = false) => {
-      if (!idProposta || usuarioLogado === null) {
-        return;
-      }
+    async (mostrarErro = false, signal?: AbortSignal) => {
+      if (!idProposta || usuarioLogado === null) return;
+      if (finalizandoTrocaRef.current) return;
+      if (carregandoPropostaRef.current) return;
 
-      // Aguarda a requisição de finalização terminar.
-      if (finalizandoTrocaRef.current) {
-        return;
-      }
-
+      carregandoPropostaRef.current = true;
       const versaoConsulta = versaoStatusRef.current;
 
       try {
-        const token = await AsyncStorage.getItem("token");
-
+        let token = tokenRef.current;
         if (!token) {
-          return;
+          token = await AsyncStorage.getItem("token");
+          tokenRef.current = token;
         }
+        if (!token) return;
 
-        const response = await fetch(
-          `${API_URL}/api/propostas`,
-          {
-            method: "GET",
-            headers: {
-              Accept: "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
+        const response = await fetch(`${API_URL}/api/propostas`, {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          signal,
+        });
+
+        if (signal?.aborted) return;
 
         const data = await response.json();
+        if (!response.ok) return;
 
-        if (!response.ok) {
-          if (mostrarErro) {
-            console.error(
-              "Erro ao carregar propostas:",
-              data?.message
-            );
-          }
+        const propostas = Array.isArray(data.propostas) ? data.propostas : [];
+        const proposta: Proposta | undefined = propostas.find(
+          (item: Proposta) => Number(item.id_proposta) === Number(idProposta)
+        );
 
-          return;
-        }
-
-        const propostas = Array.isArray(data.propostas)
-          ? data.propostas
-          : [];
-
-        const proposta: Proposta | undefined =
-          propostas.find(
-            (item: Proposta) =>
-              Number(item.id_proposta) ===
-              Number(idProposta)
-          );
-
-        if (!proposta) {
-          if (mostrarErro) {
-            console.error(
-              "Proposta não encontrada:",
-              idProposta
-            );
-          }
-
-          return;
-        }
+        if (!proposta) return;
 
         const outroUsuario =
-          Number(proposta.id_solicitante) ===
-          Number(usuarioLogado)
+          Number(proposta.id_solicitante) === Number(usuarioLogado)
             ? proposta.destinatario
             : proposta.solicitante;
 
         if (outroUsuario) {
-          setIdOutroUsuario(
-            Number(outroUsuario.id_usuario)
-          );
-
-          setNomeOutroUsuario(
-            outroUsuario.nm_usuario || ""
-          );
-
-          setFotoOutroUsuario(
-            getImageUrl(
-              outroUsuario.ds_foto_perfil
-            )
-          );
+          setIdOutroUsuario(Number(outroUsuario.id_usuario));
+          setNomeOutroUsuario(outroUsuario.nm_usuario || "");
+          setFotoOutroUsuario(getImageUrl(outroUsuario.ds_foto_perfil));
         }
 
-        // Só aplica o status se a consulta ainda for válida.
         if (
           !finalizandoTrocaRef.current &&
           versaoConsulta === versaoStatusRef.current
@@ -379,148 +530,107 @@ export default function ChatScreen() {
           if (proposta.st_troca === "F") {
             setTradeStatus("concluida");
           } else {
-            const usuarioEhSolicitante =
-              Number(proposta.id_solicitante) ===
-              Number(usuarioLogado);
+            const souSolicitante =
+              Number(proposta.id_solicitante) === Number(usuarioLogado);
+            const minhaConfirmacao = souSolicitante
+              ? proposta.st_confirmacao_solicitante
+              : proposta.st_confirmacao_destinatario;
 
-            const minhaConfirmacao =
-              usuarioEhSolicitante
-                ? proposta.st_confirmacao_solicitante
-                : proposta.st_confirmacao_destinatario;
-
-            if (minhaConfirmacao === "S") {
-              setTradeStatus("confirmada_por_mim");
-            } else {
-              setTradeStatus("em_andamento");
-            }
+            setTradeStatus(
+              minhaConfirmacao === "S"
+                ? "confirmada_por_mim"
+                : "em_andamento"
+            );
           }
         }
 
-        const itens = Array.isArray(proposta.itens)
-          ? proposta.itens
-          : [];
+        const itens = Array.isArray(proposta.itens) ? proposta.itens : [];
+        const itemDoOutro = itens.find((item) => {
+          const p = item.produto;
+          return p && Number(p.id_usuario) !== Number(usuarioLogado);
+        });
 
-        const itemDoOutroUsuario = itens.find(
-          (item: ItemProposta) => {
-            const produto = item.produto;
+        if (itemDoOutro?.produto) {
+          const produto = itemDoOutro.produto;
+          const idProd = Number(produto.id_produto);
+          setIdProduto(idProd);
+          setNomeProduto(produto.nm_produto || "");
 
-            if (!produto) {
-              return false;
-            }
-
-            return (
-              Number(produto.id_usuario) !==
-              Number(usuarioLogado)
-            );
-          }
-        );
-
-        if (itemDoOutroUsuario?.produto) {
-          const produto =
-            itemDoOutroUsuario.produto;
-
-          setIdProduto(
-            Number(produto.id_produto)
-          );
-
-          setNomeProduto(
-            produto.nm_produto || ""
-          );
-
-          let imagemProduto =
-            getProductImage(produto);
+          let imagemProduto = getProductImage(produto);
 
           if (!imagemProduto) {
-            try {
-              const produtoResponse =
-                await fetch(
-                  `${API_URL}/api/products/${produto.id_produto}`,
-                  {
-                    method: "GET",
-                    headers: {
-                      Accept: "application/json",
-                      Authorization: `Bearer ${token}`,
-                    },
-                  }
-                );
-
-              const produtoData =
-                await produtoResponse.json();
-
-              if (produtoResponse.ok) {
-                const produtoCompleto =
-                  produtoData?.produto ||
-                  produtoData?.product ||
-                  produtoData?.data ||
-                  produtoData;
-
-                imagemProduto =
-                  getProductImage(
-                    produtoCompleto
-                  );
-
-                if (
-                  produtoCompleto?.nm_produto
-                ) {
-                  setNomeProduto(
-                    produtoCompleto.nm_produto
-                  );
-                }
-              } else {
-                console.error(
-                  "Erro ao buscar produto:",
-                  produtoData?.message ||
-                    produtoResponse.status
-                );
-              }
-            } catch (error) {
-              console.error(
-                "Erro ao buscar imagem do produto:",
-                error
-              );
+            const cache = await loadProdCache(idProd);
+            if (cache) {
+              setNomeProduto(cache.nm_produto);
+              setFotoProduto(cache.imagem);
+              return;
             }
+
+            try {
+              const prodRes = await fetch(
+                `${API_URL}/api/products/${idProd}`,
+                {
+                  method: "GET",
+                  headers: {
+                    Accept: "application/json",
+                    Authorization: `Bearer ${token}`,
+                  },
+                  signal,
+                }
+              );
+
+              if (signal?.aborted) return;
+
+              const prodData = await prodRes.json();
+              if (prodRes.ok) {
+                const completo =
+                  prodData?.produto ||
+                  prodData?.product ||
+                  prodData?.data ||
+                  prodData;
+                imagemProduto = getProductImage(completo);
+                if (completo?.nm_produto) setNomeProduto(completo.nm_produto);
+
+                await saveProdCache(idProd, {
+                  nm_produto: completo?.nm_produto || produto.nm_produto || "",
+                  imagem: imagemProduto,
+                });
+              }
+            } catch {}
           }
 
           setFotoProduto(imagemProduto);
         }
-      } catch (error) {
-        if (mostrarErro) {
-          console.error(
-            "Erro ao carregar dados da proposta:",
-            error
-          );
-        }
+      } catch {
+      } finally {
+        carregandoPropostaRef.current = false;
       }
     },
     [idProposta, usuarioLogado]
   );
 
   useEffect(() => {
-    carregarDadosProposta(true);
+    const ctrl = new AbortController();
+    carregarDadosProposta(true, ctrl.signal);
+    return () => ctrl.abort();
   }, [carregarDadosProposta]);
 
   useEffect(() => {
-    if (
-      usuarioLogado === null ||
-      !idProposta
-    ) {
-      return;
-    }
+    if (usuarioLogado === null || !idProposta) return;
 
+    const ctrl = new AbortController();
     const intervalo = setInterval(() => {
-      carregarDadosProposta(false);
-    }, 5000);
+      if (appStateRef.current === "active") {
+        carregarDadosProposta(false, ctrl.signal);
+      }
+    }, INTERVALO_PROPOSTA);
 
     return () => {
       clearInterval(intervalo);
+      ctrl.abort();
     };
-  }, [
-    usuarioLogado,
-    idProposta,
-    carregarDadosProposta,
-  ]);
+  }, [usuarioLogado, idProposta, carregarDadosProposta]);
 
-  // Se a confirmação já foi registrada, fecha o modal.
   useEffect(() => {
     if (tradeStatus !== "em_andamento") {
       setModalFinalizacaoVisivel(false);
@@ -528,46 +638,30 @@ export default function ChatScreen() {
     }
   }, [tradeStatus]);
 
+  // ==========================================================
+  // CARREGAR MENSAGENS
+  // ==========================================================
   const carregarMensagens = useCallback(
-    async (mostrarLoading = false) => {
+    async (mostrarLoading = false, signal?: AbortSignal) => {
       if (!idProposta) {
         setLoadingMessages(false);
-
-        if (mostrarLoading) {
-          Alert.alert(
-            "Erro",
-            "Não foi possível identificar a proposta desta conversa."
-          );
-        }
-
         return;
       }
 
-      if (
-        usuarioLogado === null ||
-        idOutroUsuario === null
-      ) {
-        return;
-      }
+      if (usuarioLogado === null || idOutroUsuario === null) return;
+      if (carregandoMensagensRef.current) return;
+
+      carregandoMensagensRef.current = true;
 
       try {
-        if (mostrarLoading) {
-          setLoadingMessages(true);
-        }
+        if (mostrarLoading) setLoadingMessages(true);
 
-        const token =
-          await AsyncStorage.getItem("token");
-
+        let token = tokenRef.current;
         if (!token) {
-          if (mostrarLoading) {
-            Alert.alert(
-              "Não autenticado",
-              "Faça login novamente para acessar as mensagens."
-            );
-          }
-
-          return;
+          token = await AsyncStorage.getItem("token");
+          tokenRef.current = token;
         }
+        if (!token) return;
 
         const response = await fetch(
           `${API_URL}/api/propostas/${idProposta}/mensagens`,
@@ -577,611 +671,332 @@ export default function ChatScreen() {
               Accept: "application/json",
               Authorization: `Bearer ${token}`,
             },
+            signal,
           }
         );
+
+        if (signal?.aborted) return;
 
         const data = await response.json();
+        if (!response.ok) return;
 
-        if (!response.ok) {
-          if (mostrarLoading) {
-            Alert.alert(
-              "Erro",
-              data?.message ||
-                "Não foi possível carregar as mensagens."
-            );
-          }
+        const recebidas = Array.isArray(data.mensagens) ? data.mensagens : [];
 
-          return;
-        }
+        const formatadas: Message[] = recebidas
+          .map((m: any) => ({
+            id: String(m.id_mensagem),
+            sender:
+              Number(m.id_usuario) === Number(usuarioLogado) ? "me" : "other",
+            text: m.ds_mensagem || null,
+            image: getImageUrl(m.ds_imagem),
+            createdAt: m.created_at,
+          }))
+          .sort(compararMensagens);
 
-        const mensagensRecebidas =
-          Array.isArray(data.mensagens)
-            ? data.mensagens
-            : [];
-
-        const mensagensFormatadas: Message[] =
-          mensagensRecebidas
-            .map((mensagem: any) => ({
-              id: String(
-                mensagem.id_mensagem
-              ),
-              sender:
-                Number(mensagem.id_usuario) ===
-                Number(usuarioLogado)
-                  ? "me"
-                  : "other",
-              text:
-                mensagem.ds_mensagem ||
-                null,
-              image: getImageUrl(
-                mensagem.ds_imagem
-              ),
-              createdAt:
-                mensagem.created_at,
-            }))
-            .sort(
-              (
-                a: Message,
-                b: Message
-              ) => {
-                const dataA =
-                  a.createdAt
-                    ? new Date(
-                        a.createdAt
-                      ).getTime()
-                    : NaN;
-
-                const dataB =
-                  b.createdAt
-                    ? new Date(
-                        b.createdAt
-                      ).getTime()
-                    : NaN;
-
-                if (
-                  !Number.isNaN(dataA) &&
-                  !Number.isNaN(dataB) &&
-                  dataA !== dataB
-                ) {
-                  return dataA - dataB;
-                }
-
-                return (
-                  Number(a.id) -
-                  Number(b.id)
-                );
-              }
-            );
-
-        setMessages(
-          (mensagensAtuais) => {
-            const mensagensIguais =
-              mensagensAtuais.length ===
-                mensagensFormatadas.length &&
-              mensagensAtuais.every(
-                (
-                  mensagem,
-                  index
-                ) =>
-                  mensagem.id ===
-                    mensagensFormatadas[
-                      index
-                    ]?.id &&
-                  mensagem.text ===
-                    mensagensFormatadas[
-                      index
-                    ]?.text &&
-                  mensagem.image ===
-                    mensagensFormatadas[
-                      index
-                    ]?.image &&
-                  mensagem.sender ===
-                    mensagensFormatadas[
-                      index
-                    ]?.sender
-              );
-
-            if (mensagensIguais) {
-              return mensagensAtuais;
-            }
-
-            return mensagensFormatadas;
-          }
-        );
-      } catch (error) {
-        console.error(
-          "Erro ao carregar mensagens:",
-          error
-        );
-
-        if (mostrarLoading) {
-          Alert.alert(
-            "Erro",
-            "Não foi possível conectar ao servidor."
+        setMessages((atuais) => {
+          const pendentes = atuais.filter(
+            (m) => m.pending && !formatadas.some((f) => f.id === m.id)
           );
-        }
+          const combinadas = [...formatadas, ...pendentes].sort(
+            compararMensagens
+          );
+
+          if (mensagensIguais(atuais, combinadas)) return atuais;
+          saveMsgCache(idProposta, combinadas);
+          return combinadas;
+        });
+      } catch {
       } finally {
-        if (mostrarLoading) {
-          setLoadingMessages(false);
-        }
+        carregandoMensagensRef.current = false;
+        if (mostrarLoading) setLoadingMessages(false);
       }
     },
-    [
-      idProposta,
-      usuarioLogado,
-      idOutroUsuario,
-    ]
+    [idProposta, usuarioLogado, idOutroUsuario]
   );
 
   useEffect(() => {
     initialScrollDone.current = false;
-
-    scrollTimers.current.forEach(
-      (timer) => clearTimeout(timer)
-    );
-
+    scrollTimers.current.forEach(clearTimeout);
     scrollTimers.current = [];
-
     setModalFinalizacaoVisivel(false);
     setErroFinalizacao("");
   }, [idProposta]);
 
   useEffect(() => {
-    if (
-      usuarioLogado === null ||
-      !idProposta ||
-      idOutroUsuario === null
-    ) {
-      return;
-    }
+    if (usuarioLogado === null || !idProposta || idOutroUsuario === null) return;
 
-    carregarMensagens(true);
-  }, [
-    idProposta,
-    usuarioLogado,
-    idOutroUsuario,
-    carregarMensagens,
-  ]);
+    let ativo = true;
 
-  useEffect(() => {
-    if (
-      usuarioLogado === null ||
-      !idProposta ||
-      idOutroUsuario === null
-    ) {
-      return;
-    }
-
-    const intervalo = setInterval(() => {
-      carregarMensagens(false);
-    }, 5000);
+    (async () => {
+      const cached = await loadMsgCache(idProposta);
+      if (ativo && cached && cached.length > 0) {
+        setMessages(cached);
+        setLoadingMessages(false);
+      }
+      const ctrl = new AbortController();
+      await carregarMensagens(!cached, ctrl.signal);
+    })();
 
     return () => {
-      clearInterval(intervalo);
+      ativo = false;
+    };
+  }, [idProposta, usuarioLogado, idOutroUsuario, carregarMensagens]);
+
+  // ==========================================================
+  // POLLING ADAPTATIVO
+  // ==========================================================
+  useEffect(() => {
+    if (usuarioLogado === null || !idProposta || idOutroUsuario === null) return;
+
+    const ctrl = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const loop = async () => {
+      if (appStateRef.current === "active" && !sendingMessage) {
+        await carregarMensagens(false, ctrl.signal);
+      }
+
+      const delay =
+        inputTextRef.current.length > 0
+          ? INTERVALO_MENSAGENS_OCIOSO
+          : INTERVALO_MENSAGENS_ATIVO;
+
+      timer = setTimeout(loop, delay);
+    };
+
+    loop();
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      ctrl.abort();
     };
   }, [
     idProposta,
     usuarioLogado,
     idOutroUsuario,
     carregarMensagens,
+    sendingMessage,
   ]);
 
-  const abrirPerfilUsuario = () => {
+  // ==========================================================
+  // NAVEGAÇÃO
+  // ==========================================================
+  const abrirPerfilUsuario = useCallback(() => {
     if (!idOutroUsuario) {
-      Alert.alert(
-        "Erro",
-        "Não foi possível identificar este usuário."
-      );
-
+      Alert.alert("Erro", "Não foi possível identificar este usuário.");
       return;
     }
-
     router.push({
       pathname: "/visualizarperfil",
-      params: {
-        id: String(idOutroUsuario),
-      },
+      params: { id: String(idOutroUsuario) },
     } as any);
-  };
+  }, [idOutroUsuario, router]);
 
-  const abrirAnuncio = () => {
+  const abrirAnuncio = useCallback(() => {
     if (!idProduto) {
-      Alert.alert(
-        "Erro",
-        "Não foi possível identificar este anúncio."
-      );
-
+      Alert.alert("Erro", "Não foi possível identificar este anúncio.");
       return;
     }
-
     router.push({
       pathname: "/visuanuncios",
-      params: {
-        id: String(idProduto),
-      },
+      params: { id: String(idProduto) },
     } as any);
-  };
+  }, [idProduto, router]);
 
-  const abrirGaleria = async () => {
+  // ==========================================================
+  // SELEÇÃO DE IMAGEM
+  // ==========================================================
+  const abrirGaleria = useCallback(async () => {
     try {
       const permissao =
         await ImagePicker.requestMediaLibraryPermissionsAsync();
-
       if (!permissao.granted) {
         Alert.alert(
           "Permissão necessária",
           "Permita o acesso às fotos para enviar uma imagem."
         );
-
         return;
       }
 
-      const resultado =
-        await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ["images"],
-          allowsEditing: true,
-          quality: 0.8,
-        });
+      const resultado = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        quality: 0.8,
+      });
 
-      if (resultado.canceled) {
+      if (resultado.canceled) return;
+
+      const imagem = resultado.assets?.[0];
+      if (!imagem?.uri) return;
+
+      if (imagem.fileSize && imagem.fileSize > MAX_IMAGE_SIZE) {
+        Alert.alert("Arquivo muito grande", "A imagem deve ter no máximo 5MB.");
         return;
       }
 
-      const imagem =
-        resultado.assets?.[0];
-
-      if (!imagem?.uri) {
-        return;
-      }
-
-      if (
-        imagem.fileSize &&
-        imagem.fileSize > MAX_IMAGE_SIZE
-      ) {
-        Alert.alert(
-          "Arquivo muito grande",
-          "A imagem deve ter no máximo 5MB."
-        );
-
-        return;
-      }
-
-      if (
-        imagem.mimeType &&
-        !ALLOWED_IMAGE_TYPES.includes(
-          imagem.mimeType
-        )
-      ) {
-        Alert.alert(
-          "Formato não suportado",
-          "Use JPG, PNG, GIF ou WEBP."
-        );
-
+      if (imagem.mimeType && !ALLOWED_IMAGE_TYPES.includes(imagem.mimeType)) {
+        Alert.alert("Formato não suportado", "Use JPG, PNG, GIF ou WEBP.");
         return;
       }
 
       const uri = imagem.uri;
+      const fileName = uri.split("/").pop() || `imagem_${Date.now()}.jpg`;
+      const mimeType = imagem.mimeType || "image/jpeg";
 
-      const fileName =
-        uri.split("/").pop() ||
-        `imagem_${Date.now()}.jpg`;
-
-      const mimeType =
-        imagem.mimeType ||
-        "image/jpeg";
-
-      setImagemSelecionada({
-        uri,
-        name: fileName,
-        type: mimeType,
-      });
-    } catch (error) {
-      console.error(
-        "Erro ao selecionar imagem:",
-        error
-      );
-
-      Alert.alert(
-        "Erro",
-        "Não foi possível selecionar a imagem."
-      );
+      setImagemSelecionada({ uri, name: fileName, type: mimeType });
+    } catch {
+      Alert.alert("Erro", "Não foi possível selecionar a imagem.");
     }
-  };
+  }, []);
 
-  const abrirCamera = async () => {
+  const abrirCamera = useCallback(async () => {
     try {
-      const permissao =
-        await ImagePicker.requestCameraPermissionsAsync();
-
+      const permissao = await ImagePicker.requestCameraPermissionsAsync();
       if (!permissao.granted) {
         Alert.alert(
           "Permissão necessária",
           "Permita o acesso à câmera para tirar uma foto."
         );
-
         return;
       }
 
-      const resultado =
-        await ImagePicker.launchCameraAsync({
-          mediaTypes: ["images"],
-          allowsEditing: true,
-          quality: 0.8,
-        });
+      const resultado = await ImagePicker.launchCameraAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        quality: 0.8,
+      });
 
-      if (resultado.canceled) {
+      if (resultado.canceled) return;
+
+      const imagem = resultado.assets?.[0];
+      if (!imagem?.uri) return;
+
+      if (imagem.fileSize && imagem.fileSize > MAX_IMAGE_SIZE) {
+        Alert.alert("Arquivo muito grande", "A imagem deve ter no máximo 5MB.");
         return;
       }
 
-      const imagem =
-        resultado.assets?.[0];
-
-      if (!imagem?.uri) {
-        return;
-      }
-
-      if (
-        imagem.fileSize &&
-        imagem.fileSize > MAX_IMAGE_SIZE
-      ) {
-        Alert.alert(
-          "Arquivo muito grande",
-          "A imagem deve ter no máximo 5MB."
-        );
-
-        return;
-      }
-
-      if (
-        imagem.mimeType &&
-        !ALLOWED_IMAGE_TYPES.includes(
-          imagem.mimeType
-        )
-      ) {
-        Alert.alert(
-          "Formato não suportado",
-          "Use JPG, PNG, GIF ou WEBP."
-        );
-
+      if (imagem.mimeType && !ALLOWED_IMAGE_TYPES.includes(imagem.mimeType)) {
+        Alert.alert("Formato não suportado", "Use JPG, PNG, GIF ou WEBP.");
         return;
       }
 
       const uri = imagem.uri;
+      const fileName = uri.split("/").pop() || `foto_${Date.now()}.jpg`;
+      const mimeType = imagem.mimeType || "image/jpeg";
 
-      const fileName =
-        uri.split("/").pop() ||
-        `foto_${Date.now()}.jpg`;
-
-      const mimeType =
-        imagem.mimeType ||
-        "image/jpeg";
-
-      setImagemSelecionada({
-        uri,
-        name: fileName,
-        type: mimeType,
-      });
-    } catch (error) {
-      console.error(
-        "Erro ao abrir câmera:",
-        error
-      );
-
-      Alert.alert(
-        "Erro",
-        "Não foi possível abrir a câmera."
-      );
+      setImagemSelecionada({ uri, name: fileName, type: mimeType });
+    } catch {
+      Alert.alert("Erro", "Não foi possível abrir a câmera.");
     }
-  };
+  }, []);
 
-  const selecionarImagem = () => {
-    if (sendingMessage) {
-      return;
-    }
+  const selecionarImagem = useCallback(() => {
+    if (sendingMessage) return;
 
     if (Platform.OS === "web") {
-      const input =
-        document.createElement("input");
-
+      const input = document.createElement("input");
       input.type = "file";
-      input.accept =
-        "image/jpeg,image/png,image/gif,image/webp";
+      input.accept = "image/jpeg,image/png,image/gif,image/webp";
 
       input.onchange = (event: any) => {
-        const file =
-          event.target.files?.[0];
-
-        if (!file) {
-          return;
-        }
+        const file = event.target.files?.[0];
+        if (!file) return;
 
         if (file.size > MAX_IMAGE_SIZE) {
-          Alert.alert(
-            "Arquivo muito grande",
-            "A imagem deve ter no máximo 5MB."
-          );
-
+          Alert.alert("Arquivo muito grande", "A imagem deve ter no máximo 5MB.");
+          return;
+        }
+        if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+          Alert.alert("Formato não suportado", "Use JPG, PNG, GIF ou WEBP.");
           return;
         }
 
-        if (
-          !ALLOWED_IMAGE_TYPES.includes(
-            file.type
-          )
-        ) {
-          Alert.alert(
-            "Formato não suportado",
-            "Use JPG, PNG, GIF ou WEBP."
-          );
-
-          return;
-        }
-
-        const uri =
-          URL.createObjectURL(file);
-
+        const uri = URL.createObjectURL(file);
         setImagemSelecionada({
           uri,
           name: file.name,
           type: file.type,
           file,
         });
-
         input.value = "";
       };
 
       input.click();
-
       return;
     }
 
-    Alert.alert(
-      "Enviar imagem",
-      "Escolha uma opção",
-      [
-        {
-          text: "Galeria",
-          onPress: abrirGaleria,
-        },
-        {
-          text: "Câmera",
-          onPress: abrirCamera,
-        },
-        {
-          text: "Cancelar",
-          style: "cancel",
-        },
-      ]
-    );
-  };
+    Alert.alert("Enviar imagem", "Escolha uma opção", [
+      { text: "Galeria", onPress: abrirGaleria },
+      { text: "Câmera", onPress: abrirCamera },
+      { text: "Cancelar", style: "cancel" },
+    ]);
+  }, [sendingMessage, abrirGaleria, abrirCamera]);
 
-  const removerImagemSelecionada = () => {
-    if (sendingMessage) {
-      return;
+  const removerImagemSelecionada = useCallback(() => {
+    if (sendingMessage) return;
+    if (imagemSelecionada?.uri?.startsWith("blob:")) {
+      URL.revokeObjectURL(imagemSelecionada.uri);
     }
-
-    if (
-      imagemSelecionada?.uri &&
-      imagemSelecionada.uri.startsWith("blob:")
-    ) {
-      URL.revokeObjectURL(
-        imagemSelecionada.uri
-      );
-    }
-
     setImagemSelecionada(null);
-  };
+  }, [sendingMessage, imagemSelecionada]);
 
-  const handleSendMessage = async () => {
-    const mensagem =
-      inputText.trim();
+  // ==========================================================
+  // ENVIAR MENSAGEM (OPTIMISTIC UPDATE)
+  // ==========================================================
+  const handleSendMessage = useCallback(async () => {
+    const mensagem = inputText.trim();
+    if (mensagem === "" && !imagemSelecionada) return;
+    if (!idProposta || sendingMessage) return;
 
-    if (
-      mensagem === "" &&
-      !imagemSelecionada
-    ) {
-      return;
-    }
+    const tempId = `temp-${Date.now()}`;
+    const imagemLocal = imagemSelecionada?.uri || null;
 
-    if (!idProposta) {
-      Alert.alert(
-        "Erro",
-        "Não foi possível identificar a proposta desta conversa."
-      );
+    const mensagemOtimista: Message = {
+      id: tempId,
+      sender: "me",
+      text: mensagem || (imagemLocal ? "Imagem enviada" : null),
+      image: imagemLocal,
+      createdAt: new Date().toISOString(),
+      pending: true,
+    };
 
-      return;
-    }
+    setMessages((prev) => {
+      const atualizadas = [...prev, mensagemOtimista].sort(compararMensagens);
+      saveMsgCache(idProposta, atualizadas);
+      return atualizadas;
+    });
 
-    if (sendingMessage) {
-      return;
-    }
+    setInputText("");
+    setSendingMessage(true);
 
     try {
-      setSendingMessage(true);
-
-      const token =
-        await AsyncStorage.getItem("token");
-
+      let token = tokenRef.current;
       if (!token) {
-        Alert.alert(
-          "Não autenticado",
-          "Faça login novamente para enviar mensagens."
-        );
-
-        setSendingMessage(false);
-        return;
+        token = await AsyncStorage.getItem("token");
+        tokenRef.current = token;
       }
+      if (!token) throw new Error("Sem token");
 
-      const formData =
-        new FormData();
-
-      if (mensagem !== "") {
-        formData.append(
-          "ds_mensagem",
-          mensagem
-        );
-      }
+      const formData = new FormData();
+      if (mensagem !== "") formData.append("ds_mensagem", mensagem);
 
       if (imagemSelecionada) {
-        if (
-          Platform.OS === "web" &&
-          imagemSelecionada.file
-        ) {
-          formData.append(
-            "imagem",
-            imagemSelecionada.file
-          );
-        } else if (
-          Platform.OS === "web" &&
-          !imagemSelecionada.file
-        ) {
-          try {
-            const response =
-              await fetch(
-                imagemSelecionada.uri
-              );
-
-            const blob =
-              await response.blob();
-
-            const file = new File(
-              [blob],
-              imagemSelecionada.name,
-              {
-                type:
-                  imagemSelecionada.type,
-              }
-            );
-
-            formData.append(
-              "imagem",
-              file
-            );
-          } catch (error) {
-            console.error(
-              "Erro ao processar imagem:",
-              error
-            );
-
-            Alert.alert(
-              "Erro",
-              "Não foi possível processar a imagem."
-            );
-
-            setSendingMessage(false);
-            return;
-          }
+        if (Platform.OS === "web" && imagemSelecionada.file) {
+          formData.append("imagem", imagemSelecionada.file);
+        } else if (Platform.OS === "web" && !imagemSelecionada.file) {
+          const response = await fetch(imagemSelecionada.uri);
+          const blob = await response.blob();
+          const file = new File([blob], imagemSelecionada.name, {
+            type: imagemSelecionada.type,
+          });
+          formData.append("imagem", file);
         } else {
-          const arquivo = {
+          formData.append("imagem", {
             uri: imagemSelecionada.uri,
             name: imagemSelecionada.name,
             type: imagemSelecionada.type,
-          };
-
-          formData.append(
-            "imagem",
-            arquivo as any
-          );
+          } as any);
         }
       }
 
@@ -1197,127 +1012,67 @@ export default function ChatScreen() {
         }
       );
 
-      const data =
-        await response.json();
+      const data = await response.json();
 
       if (!response.ok) {
+        setMessages((prev) => prev.filter((m) => m.id !== tempId));
         Alert.alert(
           "Não foi possível enviar",
-          data?.message ||
-            "Ocorreu um erro ao enviar a mensagem."
+          data?.message || "Ocorreu um erro ao enviar a mensagem."
         );
-
         return;
       }
 
-      const novaMensagem: Message = {
-        id: String(
-          data.mensagem.id_mensagem ||
-            Date.now()
-        ),
-        sender: "me",
-        text:
-          data.mensagem.ds_mensagem ||
-          (imagemSelecionada
-            ? "Imagem enviada"
-            : null),
-        image: getImageUrl(
-          data.mensagem.ds_imagem
-        ),
-        createdAt:
-          data.mensagem.created_at ||
-          new Date().toISOString(),
-      };
+      const realId = String(data.mensagem.id_mensagem || tempId);
+      const realImage = getImageUrl(data.mensagem.ds_imagem) || imagemLocal;
 
-      setMessages((prev) =>
-        [...prev, novaMensagem].sort(
-          (a, b) => {
-            const dataA =
-              a.createdAt
-                ? new Date(
-                    a.createdAt
-                  ).getTime()
-                : NaN;
+      setMessages((prev) => {
+        const trocadas = prev
+          .map((m) =>
+            m.id === tempId
+              ? {
+                  ...m,
+                  id: realId,
+                  text: data.mensagem.ds_mensagem || m.text,
+                  image: realImage,
+                  createdAt: data.mensagem.created_at || m.createdAt,
+                  pending: false,
+                }
+              : m
+          )
+          .sort(compararMensagens);
+        saveMsgCache(idProposta, trocadas);
+        return trocadas;
+      });
 
-            const dataB =
-              b.createdAt
-                ? new Date(
-                    b.createdAt
-                  ).getTime()
-                : NaN;
-
-            if (
-              !Number.isNaN(dataA) &&
-              !Number.isNaN(dataB) &&
-              dataA !== dataB
-            ) {
-              return dataA - dataB;
-            }
-
-            return (
-              Number(a.id) -
-              Number(b.id)
-            );
-          }
-        )
-      );
-
-      setInputText("");
-
-      if (
-        imagemSelecionada?.uri &&
-        imagemSelecionada.uri.startsWith("blob:")
-      ) {
-        URL.revokeObjectURL(
-          imagemSelecionada.uri
-        );
+      if (imagemSelecionada?.uri?.startsWith("blob:")) {
+        URL.revokeObjectURL(imagemSelecionada.uri);
       }
-
       setImagemSelecionada(null);
-
-      setTimeout(() => {
-        carregarMensagens(false);
-      }, 500);
-    } catch (error) {
-      console.error(
-        "Erro ao enviar mensagem:",
-        error
-      );
-
-      Alert.alert(
-        "Erro",
-        "Não foi possível conectar ao servidor."
-      );
+    } catch {
+      setMessages((prev) => prev.filter((m) => m.id !== tempId));
+      Alert.alert("Erro", "Não foi possível conectar ao servidor.");
     } finally {
       setSendingMessage(false);
     }
-  };
+  }, [inputText, imagemSelecionada, idProposta, sendingMessage]);
 
-  // Abre apenas o modal. Não envia a finalização para a API.
-  const abrirModalFinalizacao = () => {
-    if (
-      tradeStatus !== "em_andamento" ||
-      finalizandoTrocaRef.current
-    ) {
-      return;
-    }
-
+  // ==========================================================
+  // MODAL DE FINALIZAÇÃO
+  // ==========================================================
+  const abrirModalFinalizacao = useCallback(() => {
+    if (tradeStatus !== "em_andamento" || finalizandoTrocaRef.current) return;
     setErroFinalizacao("");
     setModalFinalizacaoVisivel(true);
-  };
+  }, [tradeStatus]);
 
-  // Cancelar ou voltar no Android apenas fecha o modal.
-  const fecharModalFinalizacao = () => {
-    if (finalizandoTrocaRef.current) {
-      return;
-    }
-
+  const fecharModalFinalizacao = useCallback(() => {
+    if (finalizandoTrocaRef.current) return;
     setModalFinalizacaoVisivel(false);
     setErroFinalizacao("");
-  };
+  }, []);
 
-  // Esta função é chamada somente pelo botão "Sim, finalizar".
-  const handleFinalizeTrade = async () => {
+  const handleFinalizeTrade = useCallback(async () => {
     if (
       !modalFinalizacaoVisivel ||
       tradeStatus !== "em_andamento" ||
@@ -1327,29 +1082,24 @@ export default function ChatScreen() {
     }
 
     finalizandoTrocaRef.current = true;
-
     versaoStatusRef.current += 1;
-
     setFinalizandoTroca(true);
     setErroFinalizacao("");
 
     try {
-      const token =
-        await AsyncStorage.getItem("token");
-
+      let token = tokenRef.current;
       if (!token) {
-        setErroFinalizacao(
-          "Faça login novamente para finalizar a troca."
-        );
-
+        token = await AsyncStorage.getItem("token");
+        tokenRef.current = token;
+      }
+      if (!token) {
+        setErroFinalizacao("Faça login novamente para finalizar a troca.");
         return;
       }
-
       if (!idProposta) {
         setErroFinalizacao(
           "Não foi possível identificar a proposta desta troca."
         );
-
         return;
       }
 
@@ -1358,69 +1108,50 @@ export default function ChatScreen() {
         {
           method: "PUT",
           headers: {
-            "Content-Type":
-              "application/json",
+            "Content-Type": "application/json",
             Accept: "application/json",
             Authorization: `Bearer ${token}`,
           },
         }
       );
 
-      const data =
-        await response.json();
-
+      const data = await response.json();
       if (!response.ok) {
         setErroFinalizacao(
-          data?.message ||
-            "Ocorreu um erro ao finalizar a troca."
+          data?.message || "Ocorreu um erro ao finalizar a troca."
         );
-
         return;
       }
 
       setModalFinalizacaoVisivel(false);
 
-      if (
-        data?.troca_concluida === true
-      ) {
+      if (data?.troca_concluida === true) {
         setTradeStatus("concluida");
-
-        const systemMessage: Message = {
+        const sys: Message = {
           id: String(Date.now()),
           sender: "system",
-          text:
-            "Troca concluída com sucesso!",
+          text: "Troca concluída com sucesso!",
         };
-
-        setMessages((prev) => [
-          ...prev,
-          systemMessage,
-        ]);
-
+        setMessages((prev) => {
+          const atualizadas = [...prev, sys];
+          saveMsgCache(idProposta, atualizadas);
+          return atualizadas;
+        });
         Alert.alert(
           "Troca concluída",
           data?.message ||
             "Os dois usuários confirmaram a finalização da troca."
         );
-
         return;
       }
 
-      setTradeStatus(
-        "confirmada_por_mim"
-      );
-
+      setTradeStatus("confirmada_por_mim");
       Alert.alert(
         "Confirmação registrada",
         data?.message ||
           "Sua confirmação foi registrada. A troca será concluída quando o outro usuário também confirmar."
       );
-    } catch (error) {
-      console.error(
-        "Erro ao finalizar troca:",
-        error
-      );
-
+    } catch {
       setErroFinalizacao(
         "Não foi possível confirmar o resultado. Verifique sua conexão e aguarde a atualização do status da troca."
       );
@@ -1428,173 +1159,110 @@ export default function ChatScreen() {
       finalizandoTrocaRef.current = false;
       setFinalizandoTroca(false);
     }
-  };
+  }, [modalFinalizacaoVisivel, tradeStatus, idProposta]);
 
-  const rolarParaUltimaMensagem =
-    useCallback(() => {
-      if (
-        loadingMessages ||
-        messages.length === 0 ||
-        initialScrollDone.current
-      ) {
-        return;
-      }
-
-      const delays = [
-        0,
-        80,
-        180,
-        350,
-      ];
-
-      delays.forEach((delay) => {
-        const timer = setTimeout(() => {
-          requestAnimationFrame(() => {
-            flatListRef.current?.scrollToEnd({
-              animated: false,
-            });
-          });
-        }, delay);
-
-        scrollTimers.current.push(
-          timer
-        );
-      });
-
-      const finalTimer = setTimeout(
-        () => {
-          requestAnimationFrame(() => {
-            flatListRef.current?.scrollToEnd({
-              animated: false,
-            });
-
-            initialScrollDone.current =
-              true;
-          });
-        },
-        450
-      );
-
-      scrollTimers.current.push(
-        finalTimer
-      );
-    },
-    [loadingMessages, messages.length]
-  );
-
-  useEffect(() => {
+  // ==========================================================
+  // SCROLL
+  // ==========================================================
+  const rolarParaUltimaMensagem = useCallback(() => {
     if (
-      !loadingMessages &&
-      messages.length > 0
+      loadingMessages ||
+      messagesRef.current.length === 0 ||
+      initialScrollDone.current
     ) {
-      rolarParaUltimaMensagem();
+      return;
     }
 
-    return () => {
-      scrollTimers.current.forEach(
-        (timer) =>
-          clearTimeout(timer)
-      );
+    const delays = [0, 80, 180, 350];
+    delays.forEach((delay) => {
+      const timer = setTimeout(() => {
+        requestAnimationFrame(() => {
+          flatListRef.current?.scrollToEnd({ animated: false });
+        });
+      }, delay);
+      scrollTimers.current.push(timer);
+    });
 
+    const finalTimer = setTimeout(() => {
+      requestAnimationFrame(() => {
+        flatListRef.current?.scrollToEnd({ animated: false });
+        initialScrollDone.current = true;
+      });
+    }, 450);
+    scrollTimers.current.push(finalTimer);
+  }, [loadingMessages]);
+
+  useEffect(() => {
+    if (!loadingMessages && messages.length > 0) {
+      rolarParaUltimaMensagem();
+    }
+    return () => {
+      scrollTimers.current.forEach(clearTimeout);
       scrollTimers.current = [];
     };
-  }, [
-    loadingMessages,
-    messages.length,
-    rolarParaUltimaMensagem,
-  ]);
+  }, [loadingMessages, messages.length, rolarParaUltimaMensagem]);
 
-  const inputBottomSpace =
-    Math.max(insets.bottom, 8) + 6;
+  // ==========================================================
+  // RENDER
+  // ==========================================================
+  const inputBottomSpace = Math.max(insets.bottom, 8) + 6;
+  const previewBottom = inputBottomSpace + 64;
 
-  const previewBottom =
-    inputBottomSpace + 64;
+  const renderItem = useCallback(
+    ({ item }: { item: Message }) => <MessageItem item={item} />,
+    []
+  );
+
+  const keyExtractor = useCallback((item: Message) => item.id, []);
+
+  const handleBack = useCallback(() => {
+    if (router.canGoBack()) router.back();
+    else router.replace("/");
+  }, [router]);
 
   return (
-    <SafeAreaView
-      style={styles.mainContainer}
-    >
+    <SafeAreaView style={styles.mainContainer}>
       <KeyboardAvoidingView
-        behavior={
-          Platform.OS === "ios"
-            ? "padding"
-            : undefined
-        }
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={{ flex: 1 }}
       >
+        {/* HEADER */}
         <View style={styles.header}>
-          <TouchableOpacity
-            onPress={() => {
-              if (router.canGoBack()) {
-                router.back();
-              } else {
-                router.replace("/");
-              }
-            }}
-            style={styles.backBtn}
-          >
-            <Feather
-              name="arrow-left"
-              size={24}
-              color="#005386"
-            />
+          <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
+            <Feather name="arrow-left" size={24} color="#005386" />
           </TouchableOpacity>
 
-          <TouchableOpacity
-            activeOpacity={0.7}
-            onPress={abrirPerfilUsuario}
-          >
+          <TouchableOpacity activeOpacity={0.7} onPress={abrirPerfilUsuario}>
             {fotoOutroUsuario ? (
               <Image
-                source={{
-                  uri: fotoOutroUsuario,
-                }}
-                style={
-                  styles.headerAvatar
-                }
+                source={{ uri: fotoOutroUsuario }}
+                style={styles.headerAvatar}
               />
             ) : (
-              <View
-                style={
-                  styles.headerAvatarFallback
-                }
-              >
-                <Feather
-                  name="user"
-                  size={20}
-                  color="#005386"
-                />
+              <View style={styles.headerAvatarFallback}>
+                <Feather name="user" size={20} color="#005386" />
               </View>
             )}
           </TouchableOpacity>
 
           <View style={styles.headerInfo}>
-            <TouchableOpacity
-              activeOpacity={0.7}
-              onPress={abrirPerfilUsuario}
-            >
-              <Text
-                style={styles.headerName}
-                numberOfLines={1}
-              >
+            <TouchableOpacity activeOpacity={0.7} onPress={abrirPerfilUsuario}>
+              <Text style={styles.headerName} numberOfLines={1}>
                 {nomeOutroUsuario}
               </Text>
             </TouchableOpacity>
 
-            <Text
-              style={styles.headerStatus}
-            >
-              {tradeStatus ===
-              "concluida"
+            <Text style={styles.headerStatus}>
+              {tradeStatus === "concluida"
                 ? "Troca Concluída"
-                : tradeStatus ===
-                  "confirmada_por_mim"
+                : tradeStatus === "confirmada_por_mim"
                 ? "Aguardando confirmação"
                 : "Online"}
             </Text>
           </View>
         </View>
 
+        {/* BANNER DO PRODUTO */}
         <View style={styles.productBanner}>
           <TouchableOpacity
             style={styles.productClickable}
@@ -1603,67 +1271,34 @@ export default function ChatScreen() {
           >
             {fotoProduto ? (
               <Image
-                source={{
-                  uri: fotoProduto,
-                }}
+                source={{ uri: fotoProduto }}
                 style={styles.bannerImage}
                 resizeMode="cover"
-                onError={(event) => {
-                  console.error(
-                    "Erro ao carregar imagem do anúncio:",
-                    event.nativeEvent.error
-                  );
-                }}
               />
             ) : (
-              <View
-                style={
-                  styles.bannerImageFallback
-                }
-              >
-                <Feather
-                  name="package"
-                  size={22}
-                  color="#777777"
-                />
+              <View style={styles.bannerImageFallback}>
+                <Feather name="package" size={22} color="#777777" />
               </View>
             )}
 
             <View style={styles.bannerInfo}>
-              <Text
-                style={styles.bannerLabel}
-              >
-                Negociando sobre:
+              <Text style={styles.bannerLabel}>Negociando sobre:</Text>
+              <Text style={styles.bannerTitle} numberOfLines={1}>
+                {nomeProduto || "Anúncio"}
               </Text>
-
-              <Text
-                style={styles.bannerTitle}
-                numberOfLines={1}
-              >
-                {nomeProduto ||
-                  "Anúncio"}
-              </Text>
-
-              <Text
-                style={styles.bannerHint}
-              >
-                Toque para visualizar
-              </Text>
+              <Text style={styles.bannerHint}>Toque para visualizar</Text>
             </View>
           </TouchableOpacity>
 
-          {/* Este botão abre o modal, sem finalizar diretamente. */}
           <TouchableOpacity
             style={[
               styles.finishBtn,
               tradeStatus === "concluida"
                 ? styles.finishBtnDone
-                : tradeStatus ===
-                  "confirmada_por_mim"
+                : tradeStatus === "confirmada_por_mim"
                 ? styles.finishBtnWaiting
                 : styles.finishBtnActive,
-              finalizandoTroca &&
-                styles.buttonDisabled,
+              finalizandoTroca && styles.buttonDisabled,
             ]}
             onPress={abrirModalFinalizacao}
             disabled={
@@ -1671,262 +1306,90 @@ export default function ChatScreen() {
               tradeStatus === "confirmada_por_mim" ||
               finalizandoTroca
             }
-            accessibilityRole="button"
-            accessibilityLabel={
-              tradeStatus === "concluida"
-                ? "Troca concluída"
-                : tradeStatus === "confirmada_por_mim"
-                ? "Você já confirmou a troca"
-                : "Finalizar troca"
-            }
           >
             <Feather
               name={
-                tradeStatus ===
-                "concluida"
+                tradeStatus === "concluida"
                   ? "check-circle"
-                  : tradeStatus ===
-                    "confirmada_por_mim"
+                  : tradeStatus === "confirmada_por_mim"
                   ? "clock"
                   : "check"
               }
               size={14}
               color="#FFFFFF"
             />
-
-            <Text
-              style={
-                styles.finishBtnText
-              }
-            >
-              {tradeStatus ===
-              "concluida"
+            <Text style={styles.finishBtnText}>
+              {tradeStatus === "concluida"
                 ? "Concluída"
-                : tradeStatus ===
-                  "confirmada_por_mim"
+                : tradeStatus === "confirmada_por_mim"
                 ? "Você confirmou"
                 : "Finalizar"}
             </Text>
           </TouchableOpacity>
         </View>
 
+        {/* LISTA DE MENSAGENS */}
         <FlatList
           ref={flatListRef}
           data={messages}
-          keyExtractor={(item) =>
-            item.id
-          }
-          onContentSizeChange={() => {
-            rolarParaUltimaMensagem();
-          }}
-          contentContainerStyle={
-            styles.chatContainer
-          }
-          showsVerticalScrollIndicator={
-            false
-          }
-          renderItem={({ item }) => {
-            if (
-              item.sender === "system"
-            ) {
-              return (
-                <View
-                  style={
-                    styles.systemMessageBubble
-                  }
-                >
-                  <Text
-                    style={
-                      styles.systemMessageText
-                    }
-                  >
-                    {item.text}
-                  </Text>
-                </View>
-              );
-            }
-
-            const isMe =
-              item.sender === "me";
-
-            return (
-              <View
-                style={[
-                  styles.messageBubble,
-                  isMe
-                    ? styles.myMessage
-                    : styles.otherMessage,
-                ]}
-              >
-                {item.image ? (
-                  <Image
-                    source={{
-                      uri: item.image,
-                    }}
-                    style={
-                      styles.messageImage
-                    }
-                    resizeMode="cover"
-                  />
-                ) : null}
-
-                {item.text ? (
-                  <Text
-                    style={[
-                      styles.messageText,
-                      isMe
-                        ? styles.myMessageText
-                        : styles.otherMessageText,
-                    ]}
-                  >
-                    {item.text}
-                  </Text>
-                ) : null}
-
-                {item.createdAt ? (
-                  <Text
-                    style={[
-                      styles.messageTime,
-                      isMe
-                        ? styles.myMessageTime
-                        : styles.otherMessageTime,
-                    ]}
-                  >
-                    {formatarHora(
-                      item.createdAt
-                    )}
-                  </Text>
-                ) : null}
-              </View>
-            );
-          }}
+          keyExtractor={keyExtractor}
+          onContentSizeChange={rolarParaUltimaMensagem}
+          contentContainerStyle={styles.chatContainer}
+          showsVerticalScrollIndicator={false}
+          initialNumToRender={20}
+          maxToRenderPerBatch={15}
+          windowSize={7}
+          removeClippedSubviews={Platform.OS !== "web"}
+          renderItem={renderItem}
           ListEmptyComponent={
             !loadingMessages ? (
-              <Text
-                style={
-                  styles.emptyMessages
-                }
-              >
-                Nenhuma mensagem ainda.
-                Envie a primeira!
+              <Text style={styles.emptyMessages}>
+                Nenhuma mensagem ainda. Envie a primeira!
               </Text>
             ) : null
           }
         />
 
+        {/* PREVIEW DE IMAGEM */}
         {imagemSelecionada ? (
           <View
             style={[
               styles.imagePreviewContainer,
-              {
-                bottom: previewBottom,
-              },
+              { bottom: previewBottom },
             ]}
           >
             <Image
-              source={{
-                uri: imagemSelecionada.uri,
-              }}
+              source={{ uri: imagemSelecionada.uri }}
               style={styles.imagePreview}
             />
 
             <TouchableOpacity
-              style={
-                styles.removeImageButton
-              }
-              onPress={
-                removerImagemSelecionada
-              }
+              style={styles.removeImageButton}
+              onPress={removerImagemSelecionada}
               disabled={sendingMessage}
             >
-              <Feather
-                name="x"
-                size={14}
-                color="#FFFFFF"
-              />
+              <Feather name="x" size={14} color="#FFFFFF" />
             </TouchableOpacity>
 
-            <Text
-              style={
-                styles.imagePreviewName
-              }
-              numberOfLines={1}
-            >
+            <Text style={styles.imagePreviewName} numberOfLines={1}>
               {imagemSelecionada.name}
             </Text>
           </View>
         ) : null}
 
-        <View
-          style={[
-            styles.inputContainer,
-            {
-              bottom: inputBottomSpace,
-            },
-          ]}
-        >
-          <TouchableOpacity
-            style={[
-              styles.imageButton,
-              sendingMessage &&
-                styles.imageButtonDisabled,
-            ]}
-            onPress={
-              selecionarImagem
-            }
-            disabled={sendingMessage}
-          >
-            <Feather
-              name="image"
-              size={21}
-              color="#005386"
-            />
-          </TouchableOpacity>
-
-          <TextInput
-            style={styles.textInput}
-            placeholder="Digite sua mensagem..."
-            placeholderTextColor="#888888"
-            value={inputText}
-            onChangeText={setInputText}
-            editable={!sendingMessage}
-            multiline
-          />
-
-          <TouchableOpacity
-            style={[
-              styles.sendButton,
-              (sendingMessage ||
-                (!inputText.trim() &&
-                  !imagemSelecionada)) &&
-                styles.sendButtonDisabled,
-            ]}
-            onPress={
-              handleSendMessage
-            }
-            disabled={
-              sendingMessage ||
-              (!inputText.trim() &&
-                !imagemSelecionada)
-            }
-          >
-            {sendingMessage ? (
-              <ActivityIndicator
-                size="small"
-                color="#FFFFFF"
-              />
-            ) : (
-              <Feather
-                name="send"
-                size={18}
-                color="#FFFFFF"
-              />
-            )}
-          </TouchableOpacity>
-        </View>
+        {/* INPUT MEMOIZADO */}
+        <ChatInput
+          value={inputText}
+          onChangeText={setInputText}
+          onSend={handleSendMessage}
+          onPickImage={selecionarImagem}
+          sending={sendingMessage}
+          hasImage={!!imagemSelecionada}
+          bottomSpace={inputBottomSpace}
+        />
       </KeyboardAvoidingView>
 
-      {/* Modal de confirmação antes de registrar a finalização. */}
+      {/* MODAL DE FINALIZAÇÃO */}
       <Modal
         visible={modalFinalizacaoVisivel}
         transparent
@@ -1934,29 +1397,17 @@ export default function ChatScreen() {
         onRequestClose={fecharModalFinalizacao}
       >
         <View style={styles.modalOverlay}>
-          <View
-            style={styles.modalContainer}
-            accessibilityViewIsModal
-          >
+          <View style={styles.modalContainer} accessibilityViewIsModal>
             <ScrollView
-              contentContainerStyle={
-                styles.modalContent
-              }
+              contentContainerStyle={styles.modalContent}
               showsVerticalScrollIndicator={false}
               bounces={false}
             >
               <View style={styles.modalIconContainer}>
-                <Feather
-                  name="check-circle"
-                  size={32}
-                  color="#0099FF"
-                />
+                <Feather name="check-circle" size={32} color="#0099FF" />
               </View>
 
-              <Text
-                style={styles.modalTitle}
-                accessibilityRole="header"
-              >
+              <Text style={styles.modalTitle} accessibilityRole="header">
                 Confirmar finalização
               </Text>
 
@@ -1965,16 +1416,10 @@ export default function ChatScreen() {
               </Text>
 
               <View style={styles.modalNotice}>
-                <Feather
-                  name="info"
-                  size={18}
-                  color="#005386"
-                />
-
+                <Feather name="info" size={18} color="#005386" />
                 <Text style={styles.modalNoticeText}>
-                  Confirme somente se a troca já foi realizada.
-                  A troca será concluída quando os dois usuários
-                  confirmarem.
+                  Confirme somente se a troca já foi realizada. A troca será
+                  concluída quando os dois usuários confirmarem.
                 </Text>
               </View>
 
@@ -1994,58 +1439,33 @@ export default function ChatScreen() {
                 <TouchableOpacity
                   style={[
                     styles.modalCancelButton,
-                    finalizandoTroca &&
-                      styles.buttonDisabled,
+                    finalizandoTroca && styles.buttonDisabled,
                   ]}
                   activeOpacity={0.7}
                   onPress={fecharModalFinalizacao}
                   disabled={finalizandoTroca}
-                  accessibilityRole="button"
-                  accessibilityLabel="Cancelar finalização"
                 >
-                  <Text style={styles.modalCancelText}>
-                    Cancelar
-                  </Text>
+                  <Text style={styles.modalCancelText}>Cancelar</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
                   style={[
                     styles.modalConfirmButton,
-                    finalizandoTroca &&
-                      styles.buttonDisabled,
+                    finalizandoTroca && styles.buttonDisabled,
                   ]}
                   activeOpacity={0.7}
                   onPress={handleFinalizeTrade}
                   disabled={
-                    finalizandoTroca ||
-                    tradeStatus !== "em_andamento"
+                    finalizandoTroca || tradeStatus !== "em_andamento"
                   }
-                  accessibilityRole="button"
-                  accessibilityLabel="Sim, finalizar troca"
-                  accessibilityState={{
-                    disabled:
-                      finalizandoTroca ||
-                      tradeStatus !== "em_andamento",
-                    busy: finalizandoTroca,
-                  }}
                 >
                   {finalizandoTroca ? (
-                    <ActivityIndicator
-                      size="small"
-                      color="#FFFFFF"
-                    />
+                    <ActivityIndicator size="small" color="#FFFFFF" />
                   ) : (
-                    <Feather
-                      name="check"
-                      size={18}
-                      color="#FFFFFF"
-                    />
+                    <Feather name="check" size={18} color="#FFFFFF" />
                   )}
-
                   <Text style={styles.modalConfirmText}>
-                    {finalizandoTroca
-                      ? "Confirmando..."
-                      : "Sim, finalizar"}
+                    {finalizandoTroca ? "Confirmando..." : "Sim, finalizar"}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -2056,6 +1476,10 @@ export default function ChatScreen() {
     </SafeAreaView>
   );
 }
+
+// ============================================================
+// ESTILOS
+// ============================================================
 
 const styles = StyleSheet.create({
   mainContainer: {
@@ -2216,6 +1640,10 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 2,
   },
 
+  pendingBubble: {
+    opacity: 0.65,
+  },
+
   messageImage: {
     width: 220,
     height: 220,
@@ -2236,10 +1664,16 @@ const styles = StyleSheet.create({
     color: "#333333",
   },
 
+  messageFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    marginTop: 3,
+  },
+
   messageTime: {
     fontSize: 10,
     marginLeft: 8,
-    marginTop: 3,
   },
 
   myMessageTime: {
@@ -2288,10 +1722,7 @@ const styles = StyleSheet.create({
     shadowColor: "#000000",
     shadowOpacity: 0.15,
     shadowRadius: 5,
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowOffset: { width: 0, height: 2 },
     zIndex: 20,
   },
 
@@ -2377,8 +1808,6 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
 
-  // Estilos do modal de confirmação.
-
   buttonDisabled: {
     opacity: 0.6,
   },
@@ -2403,10 +1832,7 @@ const styles = StyleSheet.create({
     shadowColor: "#000000",
     shadowOpacity: 0.2,
     shadowRadius: 12,
-    shadowOffset: {
-      width: 0,
-      height: 5,
-    },
+    shadowOffset: { width: 0, height: 5 },
   },
 
   modalContent: {

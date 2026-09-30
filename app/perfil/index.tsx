@@ -2,13 +2,21 @@ import { Feather } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import React, { useCallback, useState } from "react";
+import React, {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   Dimensions,
   FlatList,
   Image,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -16,10 +24,22 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+
 import api from "../../services/api";
 
+// ============================================================
+// CONSTANTES
+// ============================================================
+
 const { width } = Dimensions.get("window");
-const itemWidth = (width - 44) / 2;
+const ITEM_WIDTH = (width - 44) / 2;
+const CACHE_PERFIL = 30_000;
+const TEMPO_LIMITE_REQUISICAO = 15000;
+const LIMITE_INICIAL = 8;
+const PERFIL_CACHE_KEY = "@pecapeca:perfil_cache_v1";
+const PERFIL_CACHE_MAX_AGE = 1000 * 60 * 30; // 30min
+
+type TabType = "anuncios" | "trocados" | "favoritos";
 
 interface UserProfileData {
   id_usuario?: number | string;
@@ -30,11 +50,189 @@ interface UserProfileData {
   banner: string | null;
 }
 
-type TabType = "anuncios" | "trocados" | "favoritos";
+// ============================================================
+// HELPERS
+// ============================================================
 
-export default function ProfileScreen() {
-  const router = useRouter();
+function getImageUrl(imagePath?: string | null): string | null {
+  if (!imagePath) return null;
+  const path = String(imagePath).trim();
+  if (!path) return null;
+  if (/^https?:\/\//i.test(path)) return path;
 
+  const baseUrl = String(
+    api.defaults?.baseURL || "http://127.0.0.1:8000/api"
+  )
+    .replace(/\/api\/?$/, "")
+    .replace(/\/+$/, "");
+
+  const normalized = path
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "")
+    .replace(/^storage\/+/, "");
+
+  return `${baseUrl}/storage/${normalized}`;
+}
+
+function getConditionLabel(condition: any): string {
+  const v = String(condition || "").trim().toUpperCase();
+  switch (v) {
+    case "N":
+    case "NOVO":
+      return "Novo";
+    case "S":
+    case "SEMI NOVO":
+    case "SEMINOVO":
+      return "Semi novo";
+    case "U":
+    case "USADO":
+      return "Usado";
+    case "Q":
+    case "QUEBRADO":
+      return "Quebrado";
+    default:
+      return "Não informado";
+  }
+}
+
+// ============================================================
+// CACHE
+// ============================================================
+
+async function savePerfilCache(data: {
+  user: UserProfileData;
+  userProducts: any[];
+  tradedProducts: any[];
+}) {
+  try {
+    await AsyncStorage.setItem(
+      PERFIL_CACHE_KEY,
+      JSON.stringify({
+        ts: Date.now(),
+        ...data,
+        userProducts: data.userProducts.slice(0, 50),
+        tradedProducts: data.tradedProducts.slice(0, 50),
+      })
+    );
+  } catch {}
+}
+
+async function loadPerfilCache() {
+  try {
+    const raw = await AsyncStorage.getItem(PERFIL_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.ts) return null;
+    if (Date.now() - parsed.ts > PERFIL_CACHE_MAX_AGE) return null;
+    return parsed as {
+      user: UserProfileData;
+      userProducts: any[];
+      tradedProducts: any[];
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ============================================================
+// SKELETON
+// ============================================================
+
+const SkeletonCard = memo(function SkeletonCard() {
+  return (
+    <View style={styles.listingCard}>
+      <View style={[styles.imagePlaceholder, styles.skeletonBlock]} />
+      <View style={styles.textPlaceholderRow}>
+        <View
+          style={[
+            styles.skeletonLine,
+            { width: "75%", height: 12, marginBottom: 6 },
+          ]}
+        />
+        <View style={[styles.skeletonLine, { width: "50%", height: 10 }]} />
+      </View>
+    </View>
+  );
+});
+
+// ============================================================
+// CARD DE PRODUTO (memoizado)
+// ============================================================
+
+const ProductCard = memo(function ProductCard({
+  item,
+  onOpenOptions,
+}: {
+  item: any;
+  onOpenOptions: (item: any) => void;
+}) {
+  const imagemUrl = useMemo(
+    () =>
+      item.images && item.images.length > 0
+        ? getImageUrl(item.images[0]?.ds_imagem)
+        : null,
+    [item.images]
+  );
+
+  const [failed, setFailed] = useState(false);
+  const showImage = imagemUrl && !failed;
+
+  const handlePress = useCallback(
+    () => onOpenOptions(item),
+    [onOpenOptions, item]
+  );
+
+  return (
+    <TouchableOpacity
+      style={styles.listingCard}
+      activeOpacity={0.8}
+      onPress={handlePress}
+    >
+      <View style={styles.imagePlaceholder}>
+        {showImage ? (
+          <Image
+            source={{ uri: imagemUrl! }}
+            style={styles.productImage}
+            onError={() => setFailed(true)}
+            fadeDuration={150}
+          />
+        ) : (
+          <Feather name="package" size={32} color="#0099FF" />
+        )}
+      </View>
+
+      <View style={styles.textPlaceholderRow}>
+        <Text style={styles.listingTitle} numberOfLines={1}>
+          {item.nm_produto}
+        </Text>
+
+        <Text style={styles.listingCategory} numberOfLines={1}>
+          {item.categoria?.nm_categoria || "Sem categoria"}
+        </Text>
+
+        <View style={styles.cardFooterRow}>
+          <Text style={styles.listingPrice}>
+            {getConditionLabel(item.st_condicao)}
+          </Text>
+
+          <TouchableOpacity
+            style={styles.moreOptionsButton}
+            onPress={handlePress}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Feather name="more-vertical" size={18} color="#005386" />
+          </TouchableOpacity>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+});
+
+// ============================================================
+// HOOK — PERFIL
+// ============================================================
+
+function usePerfil() {
   const [user, setUser] = useState<UserProfileData>({
     id_usuario: undefined,
     name: "",
@@ -43,1676 +241,868 @@ export default function ProfileScreen() {
     fotoPerfil: null,
     banner: null,
   });
-
-  // ============================================================
-  // ANÚNCIOS
-  // ============================================================
-
   const [userProducts, setUserProducts] = useState<any[]>([]);
   const [tradedProducts, setTradedProducts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const [loadingProducts, setLoadingProducts] =
-    useState(true);
+  const tokenRef = useRef<string | null>(null);
+  const usuarioStorageRef = useRef<any>(null);
+  const carregandoRef = useRef(false);
+  const ultimaAtualizacaoRef = useRef(0);
+  const loadedRef = useRef(false);
 
-  // ============================================================
-  // ABA ATUAL
-  // ============================================================
+  // ─── Carrega cache na montagem ────────────────────────
+  useEffect(() => {
+    let ativo = true;
+    (async () => {
+      const cached = await loadPerfilCache();
+      if (!ativo || !cached) return;
 
-  const [activeTab, setActiveTab] =
-    useState<TabType>("anuncios");
+      setUser(cached.user);
+      setUserProducts(cached.userProducts || []);
+      setTradedProducts(cached.tradedProducts || []);
+      setLoading(false);
+      loadedRef.current = true;
+    })();
 
-  // ============================================================
-  // MODAIS
-  // ============================================================
+    return () => {
+      ativo = false;
+    };
+  }, []);
 
-  const [logoutModalVisible, setLogoutModalVisible] =
-    useState(false);
+  // ─── Token helper (CORRIGIDO — sem recursão) ──────────
+  const obterToken = useCallback(async (): Promise<string | null> => {
+    if (tokenRef.current) return tokenRef.current;
+    const token = await AsyncStorage.getItem("token");
+    tokenRef.current = token;
+    return token;
+  }, []);
 
-  const [selectedAd, setSelectedAd] =
-    useState<any>(null);
+  // ─── Carrega dados (cache-first + SWR) ────────────────
+  const carregarPerfil = useCallback(
+    async (mostrarLoading = false, forcar = false, signal?: AbortSignal) => {
+      if (carregandoRef.current) return;
 
-  const [optionsModalVisible, setOptionsModalVisible] =
-    useState(false);
-
-  const [deleteModalVisible, setDeleteModalVisible] =
-    useState(false);
-
-  const [statusModalVisible, setStatusModalVisible] =
-    useState(false);
-
-  // ============================================================
-  // URL DAS IMAGENS
-  // ============================================================
-
-  function getImageUrl(
-    imagePath?: string | null
-  ): string | null {
-    if (!imagePath) {
-      return null;
-    }
-
-    if (
-      imagePath.startsWith("http://") ||
-      imagePath.startsWith("https://")
-    ) {
-      return imagePath;
-    }
-
-    const baseUrl =
-      api.defaults.baseURL?.replace(
-        /\/api\/?$/,
-        ""
-      ) || "http://127.0.0.1:8000";
-
-    const normalizedPath = imagePath
-      .replace(/^\/+/, "")
-      .replace(/^storage\/+/, "");
-
-    return `${baseUrl}/storage/${normalizedPath}`;
-  }
-
-  // ============================================================
-  // CARREGAR AO ENTRAR / VOLTAR PARA A TELA
-  // ============================================================
-
-  useFocusEffect(
-    useCallback(() => {
-      carregarUsuario();
-      fetchUserProducts();
-      fetchTradedProducts();
-    }, [])
-  );
-
-  // ============================================================
-  // CARREGAR USUÁRIO
-  // ============================================================
-
-  async function carregarUsuario() {
-    try {
-      const dados =
-        await AsyncStorage.getItem("usuario");
-
-      if (!dados) {
-        console.log(
-          "Nenhum usuário encontrado no AsyncStorage."
-        );
+      if (
+        !forcar &&
+        loadedRef.current &&
+        Date.now() - ultimaAtualizacaoRef.current < CACHE_PERFIL
+      ) {
         return;
       }
 
-      const usuarioStorage =
-        JSON.parse(dados);
-
-      console.log(
-        "USUARIO DO STORAGE:",
-        usuarioStorage
-      );
-
-      // ----------------------------------------------------------
-      // PRIMEIRO: mostra imediatamente o que estiver no storage
-      // ----------------------------------------------------------
-
-      setUser({
-        id_usuario:
-          usuarioStorage.id_usuario ||
-          usuarioStorage.id ||
-          undefined,
-
-        name:
-          usuarioStorage.nm_usuario ||
-          "",
-
-        description:
-          usuarioStorage.ds_usuario ||
-          "Descrição não informada",
-
-        rating: "5.0",
-
-        fotoPerfil:
-          usuarioStorage.ds_foto_perfil ||
-          null,
-
-        banner:
-          usuarioStorage.ds_banner ||
-          null,
-      });
-
-      // ----------------------------------------------------------
-      // DEPOIS: busca os dados atualizados na API
-      // ----------------------------------------------------------
-
-      const idUsuario =
-        usuarioStorage.id_usuario ||
-        usuarioStorage.id;
-
-      const token =
-        await AsyncStorage.getItem("token");
-
-      if (!idUsuario || !token) {
-        console.log(
-          "ID do usuário ou token não encontrado."
-        );
-        return;
-      }
+      carregandoRef.current = true;
+      if (mostrarLoading && !loadedRef.current) setLoading(true);
 
       try {
-        console.log(
-          "BUSCANDO USUÁRIO ATUALIZADO:",
-          idUsuario
-        );
+        // Token e usuário em paralelo
+        let token = tokenRef.current;
+        let usuarioStorage = usuarioStorageRef.current;
 
-        const response =
-          await api.get(
-            `/users/${idUsuario}`,
-            {
-              headers: {
-                Accept:
-                  "application/json",
-                Authorization:
-                  `Bearer ${token}`,
-              },
-            }
-          );
+        if (!token || !usuarioStorage) {
+          const [tokenStorage, usuarioTexto] = await Promise.all([
+            token ? Promise.resolve(token) : AsyncStorage.getItem("token"),
+            usuarioStorage
+              ? Promise.resolve(JSON.stringify(usuarioStorage))
+              : AsyncStorage.getItem("usuario"),
+          ]);
 
-        console.log(
-          "USUÁRIO RECEBIDO DA API:",
-          response.data
-        );
+          token = tokenStorage;
+          tokenRef.current = tokenStorage;
 
-        // --------------------------------------------------------
-        // ALGUMAS APIs retornam { user: {...} }
-        // e outras retornam diretamente {...}
-        // --------------------------------------------------------
+          if (!usuarioStorage && usuarioTexto) {
+            try {
+              usuarioStorage = JSON.parse(usuarioTexto);
+              usuarioStorageRef.current = usuarioStorage;
+            } catch {}
+          }
+        }
 
-        const usuarioAPI =
-          response.data?.user ||
-          response.data;
+        if (signal?.aborted) return;
 
-        if (!usuarioAPI) {
-          console.log(
-            "API não retornou os dados do usuário."
-          );
+        // Mostra dados locais IMEDIATAMENTE
+        if (usuarioStorage) {
+          setUser({
+            id_usuario:
+              usuarioStorage.id_usuario || usuarioStorage.id || undefined,
+            name: usuarioStorage.nm_usuario || "",
+            description:
+              usuarioStorage.ds_usuario || "Descrição não informada",
+            rating: "5.0",
+            fotoPerfil: usuarioStorage.ds_foto_perfil || null,
+            banner: usuarioStorage.ds_banner || null,
+          });
+        }
+
+        if (!token) {
+          setLoading(false);
           return;
         }
 
-        const usuarioAtualizado = {
-          ...usuarioStorage,
-          ...usuarioAPI,
-        };
+        const idUsuario =
+          usuarioStorage?.id_usuario || usuarioStorage?.id;
 
-        // --------------------------------------------------------
-        // ATUALIZA O STORAGE
-        // --------------------------------------------------------
+        // Requisições em paralelo
+        const reqs: Promise<any>[] = [
+          api.get("/my-products", {
+            headers: {
+              Accept: "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            signal,
+            timeout: TEMPO_LIMITE_REQUISICAO,
+          }),
+          api.get("/my-products?status=T", {
+            headers: {
+              Accept: "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            signal,
+            timeout: TEMPO_LIMITE_REQUISICAO,
+          }),
+        ];
 
-        await AsyncStorage.setItem(
-          "usuario",
-          JSON.stringify(
-            usuarioAtualizado
-          )
-        );
+        if (idUsuario) {
+          reqs.push(
+            api.get(`/users/${idUsuario}`, {
+              headers: {
+                Accept: "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              signal,
+              timeout: TEMPO_LIMITE_REQUISICAO,
+            })
+          );
+        }
 
-        console.log(
-          "USUÁRIO ATUALIZADO NO STORAGE:",
-          usuarioAtualizado
-        );
+        const resultados = await Promise.allSettled(reqs);
 
-        // --------------------------------------------------------
-        // ATUALIZA A TELA
-        // --------------------------------------------------------
+        if (signal?.aborted) return;
 
-        setUser({
-          id_usuario:
-            usuarioAtualizado.id_usuario ||
-            usuarioAtualizado.id ||
-            idUsuario,
+        // Anúncios
+        if (resultados[0]?.status === "fulfilled") {
+          const d = resultados[0].value.data;
+          setUserProducts(
+            Array.isArray(d) ? d : Array.isArray(d?.data) ? d.data : []
+          );
+        }
 
-          name:
-            usuarioAtualizado.nm_usuario ||
-            "",
+        // Trocados
+        if (resultados[1]?.status === "fulfilled") {
+          const d = resultados[1].value.data;
+          setTradedProducts(
+            Array.isArray(d) ? d : Array.isArray(d?.data) ? d.data : []
+          );
+        }
 
-          description:
-            usuarioAtualizado.ds_usuario ||
-            "Descrição não informada",
+        // Usuário atualizado
+        if (resultados[2]?.status === "fulfilled" && usuarioStorage) {
+          const usuarioAPI =
+            resultados[2].value.data?.user || resultados[2].value.data;
 
-          rating: "5.0",
+          if (usuarioAPI) {
+            const atualizado = { ...usuarioStorage, ...usuarioAPI };
+            usuarioStorageRef.current = atualizado;
 
-          fotoPerfil:
-            usuarioAtualizado.ds_foto_perfil ||
-            null,
+            setUser({
+              id_usuario:
+                atualizado.id_usuario ||
+                atualizado.id ||
+                idUsuario,
+              name: atualizado.nm_usuario || "",
+              description:
+                atualizado.ds_usuario || "Descrição não informada",
+              rating: "5.0",
+              fotoPerfil: atualizado.ds_foto_perfil || null,
+              banner: atualizado.ds_banner || null,
+            });
 
-          banner:
-            usuarioAtualizado.ds_banner ||
-            null,
+            void AsyncStorage.setItem(
+              "usuario",
+              JSON.stringify(atualizado)
+            );
+          }
+        }
+
+        loadedRef.current = true;
+        ultimaAtualizacaoRef.current = Date.now();
+
+        // Salva cache
+        setUserProducts((up) => {
+          setTradedProducts((tp) => {
+            void savePerfilCache({
+              user: usuarioStorage,
+              userProducts: up,
+              tradedProducts: tp,
+            });
+            return tp;
+          });
+          return up;
         });
-      } catch (error: any) {
-        console.log(
-          "ERRO AO BUSCAR USUÁRIO NA API:",
-          error?.response?.status,
-          error?.response?.data ||
-            error
-        );
-
-        // Se a API falhar, mantém os dados do storage.
+      } catch (error) {
+        if (!signal?.aborted) {
+          console.warn("Erro ao carregar perfil:", error);
+        }
+      } finally {
+        carregandoRef.current = false;
+        setLoading(false);
       }
-    } catch (erro) {
-      console.log(
-        "ERRO AO CARREGAR USUÁRIO:",
-        erro
+    },
+    []
+  );
+
+  // ─── Primeiro fetch ────────────────────────────────────
+  useEffect(() => {
+    const ctrl = new AbortController();
+    carregarPerfil(true, true, ctrl.signal);
+    return () => ctrl.abort();
+  }, [carregarPerfil]);
+
+  // ─── Refresh em foco (throttled) ──────────────────────
+  useFocusEffect(
+    useCallback(() => {
+      if (!loadedRef.current) return;
+      if (Date.now() - ultimaAtualizacaoRef.current < CACHE_PERFIL) return;
+
+      const ctrl = new AbortController();
+      carregarPerfil(false, false, ctrl.signal);
+      return () => ctrl.abort();
+    }, [carregarPerfil])
+  );
+
+  // ─── Helpers de mutação local ─────────────────────────
+  const removerProdutoLocal = useCallback((id: number) => {
+    setUserProducts((prev) => {
+      const novas = prev.filter(
+        (p) => Number(p.id_produto || p.id) !== Number(id)
       );
-    }
-  }
+      setTradedProducts((tp) => {
+        void savePerfilCache({
+          user: usuarioStorageRef.current,
+          userProducts: novas,
+          tradedProducts: tp,
+        });
+        return tp;
+      });
+      return novas;
+    });
+  }, []);
 
-  // ============================================================
-  // CARREGAR ANÚNCIOS
-  // ============================================================
-
-  async function fetchUserProducts() {
-    try {
-      setLoadingProducts(true);
-
-      const token =
-        await AsyncStorage.getItem("token");
-
-      if (!token) {
-        console.log(
-          "Token não encontrado."
-        );
-        return;
-      }
-
-      const response =
-        await api.get(
-          "/my-products",
-          {
-            headers: {
-              Accept:
-                "application/json",
-              Authorization:
-                `Bearer ${token}`,
-            },
-          }
-        );
-
-      console.log(
-        "ANÚNCIOS DO PERFIL:",
-        response.data
+  const atualizarStatusLocal = useCallback((id: number, status: string) => {
+    setUserProducts((prev) => {
+      const novas = prev.map((p) =>
+        Number(p.id_produto || p.id) === Number(id)
+          ? { ...p, st_status: status }
+          : p
       );
+      setTradedProducts((tp) => {
+        void savePerfilCache({
+          user: usuarioStorageRef.current,
+          userProducts: novas,
+          tradedProducts: tp,
+        });
+        return tp;
+      });
+      return novas;
+    });
+  }, []);
 
-      setUserProducts(
-        Array.isArray(response.data)
-          ? response.data
-          : []
-      );
-    } catch (error: any) {
-      console.log(
-        "ERRO AO CARREGAR ANÚNCIOS:",
-        error?.response?.data ||
-          error
-      );
-    } finally {
-      setLoadingProducts(false);
-    }
-  }
+  const recarregar = useCallback(() => {
+    ultimaAtualizacaoRef.current = 0;
+    carregarPerfil(false, true);
+  }, [carregarPerfil]);
 
-  // ============================================================
-  // CARREGAR ANÚNCIOS TROCADOS
-  // ============================================================
-
-  async function fetchTradedProducts() {
-    try {
-      const token =
-        await AsyncStorage.getItem("token");
-
-      if (!token) {
-        return;
-      }
-
-      const response =
-        await api.get(
-          "/my-products?status=T",
-          {
-            headers: {
-              Accept:
-                "application/json",
-              Authorization:
-                `Bearer ${token}`,
-            },
-          }
-        );
-
-      console.log(
-        "ANÚNCIOS TROCADOS:",
-        response.data
-      );
-
-      setTradedProducts(
-        Array.isArray(response.data)
-          ? response.data
-          : []
-      );
-    } catch (error: any) {
-      console.log(
-        "ERRO AO CARREGAR ANÚNCIOS TROCADOS:",
-        error?.response?.data ||
-          error
-      );
-    }
-  }
-
-  // ============================================================
-  // CONDIÇÃO DO PRODUTO
-  // ============================================================
-
-  const getConditionLabel = (
-    condition: any
-  ) => {
-    const valor =
-      String(condition || "")
-        .trim()
-        .toUpperCase();
-
-    switch (valor) {
-      case "N":
-      case "NOVO":
-        return "Novo";
-
-      case "S":
-      case "SEMI NOVO":
-      case "SEMINOVO":
-        return "Semi novo";
-
-      case "U":
-      case "USADO":
-        return "Usado";
-
-      case "Q":
-      case "QUEBRADO":
-        return "Quebrado";
-
-      default:
-        return "Não informado";
-    }
+  return {
+    user,
+    userProducts,
+    tradedProducts,
+    loading,
+    obterToken,
+    recarregar,
+    removerProdutoLocal,
+    atualizarStatusLocal,
   };
+}
 
-  // ============================================================
-  // ABRIR OPÇÕES DO ANÚNCIO
-  // ============================================================
+// ============================================================
+// TELA
+// ============================================================
 
-  const handleOpenAdOptions = (
-    item: any
-  ) => {
+export default function ProfileScreen() {
+  const router = useRouter();
+
+  const {
+    user,
+    userProducts,
+    tradedProducts,
+    loading,
+    obterToken,
+    recarregar,
+    removerProdutoLocal,
+    atualizarStatusLocal,
+  } = usePerfil();
+
+  const [activeTab, setActiveTab] = useState<TabType>("anuncios");
+  const [limiteVisivel, setLimiteVisivel] = useState(LIMITE_INICIAL);
+
+  const [logoutModalVisible, setLogoutModalVisible] = useState(false);
+  const [selectedAd, setSelectedAd] = useState<any>(null);
+  const [optionsModalVisible, setOptionsModalVisible] = useState(false);
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [statusModalVisible, setStatusModalVisible] = useState(false);
+  const [processando, setProcessando] = useState(false);
+
+  useEffect(() => {
+    setLimiteVisivel(LIMITE_INICIAL);
+  }, [activeTab]);
+
+  // ─── Produtos exibidos ────────────────────────────────
+  const displayedProducts = useMemo(
+    () => (activeTab === "trocados" ? tradedProducts : userProducts),
+    [activeTab, tradedProducts, userProducts]
+  );
+
+  const produtosVisiveis = useMemo(
+    () => displayedProducts.slice(0, limiteVisivel),
+    [displayedProducts, limiteVisivel]
+  );
+
+  const temMais = displayedProducts.length > limiteVisivel;
+
+  // ─── Handlers ─────────────────────────────────────────
+  const handleOpenAdOptions = useCallback((item: any) => {
     setSelectedAd(item);
     setOptionsModalVisible(true);
-  };
+  }, []);
 
-  // ============================================================
-  // EDITAR ANÚNCIO
-  // ============================================================
-
-  const handleEditAd = () => {
-    if (
-      selectedAd?.st_status === "T"
-    ) {
-      return;
-    }
+  const handleEditAd = useCallback(() => {
+    if (selectedAd?.st_status === "T") return;
 
     setOptionsModalVisible(false);
-
-    const productId =
-      selectedAd?.id_produto ||
-      selectedAd?.id;
-
-    if (!productId) {
-      console.log(
-        "Produto não encontrado."
-      );
-      return;
-    }
+    const productId = selectedAd?.id_produto || selectedAd?.id;
+    if (!productId) return;
 
     router.push({
       pathname: "/editaranuncio",
-      params: {
-        id: String(productId),
-      },
+      params: { id: String(productId) },
     } as any);
-  };
+  }, [selectedAd, router]);
 
-  // ============================================================
-  // ABRIR EXCLUSÃO
-  // ============================================================
-
-  const handleOpenDeleteModal = () => {
+  const handleOpenDeleteModal = useCallback(() => {
     setOptionsModalVisible(false);
     setDeleteModalVisible(true);
-  };
+  }, []);
 
-  // ============================================================
-  // CONFIRMAR EXCLUSÃO
-  // ============================================================
+  const handleConfirmDelete = useCallback(async () => {
+    if (processando) return;
+    setProcessando(true);
 
-  const handleConfirmDelete =
-    async () => {
+    const productId = selectedAd?.id_produto || selectedAd?.id;
+
+    try {
+      const token = await obterToken();
+      if (!token || !productId) return;
+
+      // Otimista: remove da UI imediatamente
+      removerProdutoLocal(productId);
+
+      await api.delete(`/products/${productId}`, {
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        timeout: TEMPO_LIMITE_REQUISICAO,
+      });
+
+      recarregar();
+    } catch (error: any) {
+      // Reverte
+      recarregar();
+      console.warn(
+        "Erro ao excluir:",
+        error?.response?.data || error?.message
+      );
+    } finally {
+      setProcessando(false);
+      setDeleteModalVisible(false);
+      setSelectedAd(null);
+    }
+  }, [selectedAd, obterToken, removerProdutoLocal, recarregar, processando]);
+
+  const handleUpdateStatus = useCallback(
+    async (novoStatus: string) => {
+      if (processando) return;
+      setProcessando(true);
+
+      const productId = selectedAd?.id_produto || selectedAd?.id;
+
+      const codigoMap: Record<string, string> = {
+        Disponível: "A",
+        "Em Negociação": "N",
+        Trocado: "T",
+      };
+      const statusCodigo = codigoMap[novoStatus];
+
       try {
-        const token =
-          await AsyncStorage.getItem(
-            "token"
-          );
+        const token = await obterToken();
+        if (!token || !productId || !statusCodigo) return;
 
-        const productId =
-          selectedAd?.id_produto ||
-          selectedAd?.id;
-
-        console.log(
-          "ID QUE SERÁ EXCLUÍDO:",
-          productId
-        );
-
-        if (!token) {
-          console.log(
-            "Token não encontrado."
-          );
-          return;
-        }
-
-        if (!productId) {
-          console.log(
-            "Produto não encontrado."
-          );
-          return;
-        }
-
-        const response =
-          await api.delete(
-            `/products/${productId}`,
-            {
-              headers: {
-                Accept:
-                  "application/json",
-                Authorization:
-                  `Bearer ${token}`,
-              },
-            }
-          );
-
-        console.log(
-          "RESPOSTA DO DELETE:",
-          response.data
-        );
-
-        await fetchUserProducts();
-        await fetchTradedProducts();
-      } catch (error: any) {
-        console.log(
-          "STATUS DO ERRO:",
-          error?.response?.status
-        );
-
-        console.log(
-          "RESPOSTA DO SERVIDOR:",
-          error?.response?.data
-        );
-
-        console.log(
-          "ERRO COMPLETO:",
-          error
-        );
-      } finally {
-        setDeleteModalVisible(false);
-        setSelectedAd(null);
-      }
-    };
-
-  // ============================================================
-  // UC18 - ALTERAR STATUS
-  // ============================================================
-
-  const handleUpdateStatus =
-    async (
-      novoStatus: string
-    ) => {
-      try {
-        const token =
-          await AsyncStorage.getItem(
-            "token"
-          );
-
-        const productId =
-          selectedAd?.id_produto ||
-          selectedAd?.id;
-
-        if (!token) {
-          console.log(
-            "Token não encontrado."
-          );
-          return;
-        }
-
-        if (!productId) {
-          console.log(
-            "Produto não encontrado."
-          );
-          return;
-        }
-
-        let statusCodigo = "";
-
-        if (
-          novoStatus ===
-          "Disponível"
-        ) {
-          statusCodigo = "A";
-        } else if (
-          novoStatus ===
-          "Em Negociação"
-        ) {
-          statusCodigo = "N";
-        } else if (
-          novoStatus === "Trocado"
-        ) {
-          statusCodigo = "T";
-        }
-
-        if (!statusCodigo) {
-          console.log(
-            "Status inválido."
-          );
-          return;
-        }
+        // Otimista
+        atualizarStatusLocal(productId, statusCodigo);
 
         await api.put(
           `/products/${productId}/status`,
-          {
-            st_status:
-              statusCodigo,
-          },
+          { st_status: statusCodigo },
           {
             headers: {
-              Accept:
-                "application/json",
-              Authorization:
-                `Bearer ${token}`,
+              Accept: "application/json",
+              Authorization: `Bearer ${token}`,
             },
+            timeout: TEMPO_LIMITE_REQUISICAO,
           }
         );
 
-        setStatusModalVisible(
-          false
-        );
-
-        await fetchUserProducts();
-        await fetchTradedProducts();
-
-        console.log(
-          `Status do produto ${productId} atualizado para ${statusCodigo}.`
-        );
+        recarregar();
       } catch (error: any) {
-        console.log(
-          "ERRO AO ALTERAR STATUS:",
-          error?.response?.data ||
-            error
+        recarregar();
+        console.warn(
+          "Erro ao alterar status:",
+          error?.response?.data || error?.message
         );
+      } finally {
+        setProcessando(false);
+        setStatusModalVisible(false);
       }
-    };
+    },
+    [selectedAd, obterToken, atualizarStatusLocal, recarregar, processando]
+  );
 
-  // ============================================================
-  // LOGOUT
-  // ============================================================
-
-  async function sairDaConta() {
+  const sairDaConta = useCallback(async () => {
     try {
-      const token =
-        await AsyncStorage.getItem(
-          "token"
-        );
-
+      const token = await obterToken();
       if (token) {
-        await api.post(
-          "/logout",
-          {},
-          {
-            headers: {
-              Accept:
-                "application/json",
-              Authorization:
-                `Bearer ${token}`,
-            },
-          }
-        );
+        await api
+          .post(
+            "/logout",
+            {},
+            {
+              headers: {
+                Accept: "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+            }
+          )
+          .catch(() => {});
       }
-    } catch (erro) {
-      console.log(
-        "ERRO AO FAZER LOGOUT:",
-        erro
-      );
-    }
+    } catch {}
 
-    await AsyncStorage.removeItem(
-      "token"
-    );
+    await AsyncStorage.multiRemove(["token", "usuario"]);
+    router.replace("/(auth)/login");
+  }, [obterToken, router]);
 
-    await AsyncStorage.removeItem(
-      "usuario"
-    );
+  const handleChangeTab = useCallback(
+    (tab: TabType) => {
+      if (tab === "favoritos") {
+        router.push("/favoritos" as any);
+        return;
+      }
+      setActiveTab(tab);
+    },
+    [router]
+  );
 
-    router.replace(
-      "/(auth)/login"
-    );
-  }
+  const carregarMais = useCallback(
+    () => setLimiteVisivel((v) => v + LIMITE_INICIAL),
+    []
+  );
 
-  // ============================================================
-  // PRODUTOS EXIBIDOS
-  // ============================================================
+  // ─── Empty message ────────────────────────────────────
+  const emptyMessage = useMemo(
+    () =>
+      activeTab === "trocados"
+        ? "Você ainda não possui anúncios trocados."
+        : "Você ainda não possui anúncios cadastrados.",
+    [activeTab]
+  );
 
-  const displayedProducts =
-    activeTab === "trocados"
-      ? tradedProducts
-      : userProducts;
+  // ─── Render Item ──────────────────────────────────────
+  const renderItem = useCallback(
+    ({ item }: { item: any }) => (
+      <ProductCard item={item} onOpenOptions={handleOpenAdOptions} />
+    ),
+    [handleOpenAdOptions]
+  );
 
-  // ============================================================
-  // TROCA DE ABA
-  // ============================================================
+  const keyExtractor = useCallback(
+    (item: any) => String(item.id_produto || item.id),
+    []
+  );
 
-  const handleChangeTab = (
-    tab: TabType
-  ) => {
-    if (
-      tab === "favoritos"
-    ) {
-      router.push(
-        "/favoritos" as any
-      );
-      return;
-    }
+  // ─── Header (memoizado) ───────────────────────────────
+  const ListHeader = useMemo(
+    () => (
+      <View>
+        {/* BANNER */}
+        <View style={styles.bannerContainer}>
+          {getImageUrl(user.banner) ? (
+            <Image
+              source={{ uri: getImageUrl(user.banner)! }}
+              style={styles.bannerImage}
+              fadeDuration={150}
+            />
+          ) : (
+            <View style={styles.bannerPlaceholder}>
+              <Feather name="image" size={35} color="#0099FF" />
+            </View>
+          )}
+        </View>
 
-    setActiveTab(tab);
-  };
+        {/* DADOS DO USUÁRIO */}
+        <View style={styles.profileInfoContainer}>
+          <View style={styles.roundAvatar}>
+            {getImageUrl(user.fotoPerfil) ? (
+              <Image
+                source={{ uri: getImageUrl(user.fotoPerfil)! }}
+                style={styles.profileImage}
+                fadeDuration={150}
+              />
+            ) : (
+              <Feather name="user" size={45} color="#005386" />
+            )}
+          </View>
 
-  // ============================================================
-  // TEXTO DA LISTA VAZIA
-  // ============================================================
+          <View style={styles.userInfoTextContainer}>
+            <Text style={styles.userName}>{user.name || "Usuário"}</Text>
 
-  const emptyMessage =
-    activeTab === "trocados"
-      ? "Você ainda não possui anúncios trocados."
-      : "Você ainda não possui anúncios cadastrados.";
+            <View style={styles.addressRow}>
+              <Feather
+                name="file-text"
+                size={12}
+                color="#0099FF"
+                style={styles.addressIcon}
+              />
+              <Text style={styles.userSubtext} numberOfLines={2}>
+                {user.description}
+              </Text>
+            </View>
 
-  // ============================================================
-  // TELA
-  // ============================================================
+            <TouchableOpacity
+              style={styles.editProfileButton}
+              onPress={() => router.push("/perfil/editarPerfil" as any)}
+              activeOpacity={0.7}
+            >
+              <Feather name="edit-3" size={14} color="#FFFFFF" />
+              <Text style={styles.editProfileText}>Editar perfil</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* AVALIAÇÃO */}
+        <View style={styles.ratingContainer}>
+          <View style={styles.starsRow}>
+            {[0, 1, 2, 3, 4].map((i) => (
+              <Feather
+                key={i}
+                name="star"
+                size={18}
+                color="#005386"
+                style={i < 4 ? styles.starIcon : undefined}
+              />
+            ))}
+          </View>
+          <Text style={styles.ratingText}>— {user.rating}</Text>
+        </View>
+
+        {/* ABAS */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.tabsContainer}
+        >
+          {(
+            [
+              ["anuncios", "Anúncios"],
+              ["trocados", "Anúncios trocados"],
+              ["favoritos", "Favoritos"],
+            ] as const
+          ).map(([key, label]) => {
+            const isActive = activeTab === key;
+            const isFav = key === "favoritos";
+            return (
+              <TouchableOpacity
+                key={key}
+                style={[
+                  styles.tabItem,
+                  isFav && styles.favoriteTabItem,
+                  isActive && styles.activeTab,
+                ]}
+                onPress={() => handleChangeTab(key)}
+                activeOpacity={0.7}
+              >
+                <Text
+                  style={[styles.tabText, isActive && styles.activeTabText]}
+                >
+                  {label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+    ),
+    [user, activeTab, handleChangeTab, router]
+  );
+
+  // ==========================================================
+  // RENDER
+  // ==========================================================
 
   return (
-    <SafeAreaView
-      style={styles.container}
-    >
+    <SafeAreaView style={styles.container}>
       <StatusBar style="dark" />
 
       {/* HEADER */}
-
       <View style={styles.header}>
         <TouchableOpacity
           onPress={() => {
-            if (router.canGoBack()) {
-              router.back();
-            } else {
-              router.replace(
-                "/(tabs)"
-              );
-            }
+            if (router.canGoBack()) router.back();
+            else router.replace("/(tabs)");
           }}
-          style={
-            styles.headerButton
-          }
+          style={styles.headerButton}
         >
-          <Feather
-            name="arrow-left"
-            size={24}
-            color="#005386"
-          />
+          <Feather name="arrow-left" size={24} color="#005386" />
         </TouchableOpacity>
 
         <TouchableOpacity
-          onPress={() =>
-            router.push(
-              "/perfil/configuracoes" as any
-            )
-          }
-          style={
-            styles.headerButton
-          }
+          onPress={() => router.push("/perfil/configuracoes" as any)}
+          style={styles.headerButton}
         >
-          <Feather
-            name="settings"
-            size={22}
-            color="#005386"
-          />
+          <Feather name="settings" size={22} color="#005386" />
         </TouchableOpacity>
       </View>
 
       {/* CONTEÚDO */}
-
       <FlatList
-        data={displayedProducts}
-        keyExtractor={(item) =>
-          String(
-            item.id_produto ||
-              item.id
-          )
-        }
+        data={loading && userProducts.length === 0 ? [] : produtosVisiveis}
+        keyExtractor={keyExtractor}
         numColumns={2}
-        columnWrapperStyle={
-          styles.gridRow
-        }
-        contentContainerStyle={
-          styles.listContent
-        }
-        showsVerticalScrollIndicator={
-          false
-        }
-        ListHeaderComponent={
-          <View>
-            {/* BANNER */}
-
-            <View
-              style={
-                styles.bannerContainer
-              }
-            >
-              {getImageUrl(
-                user.banner
-              ) ? (
-                <Image
-                  source={{
-                    uri:
-                      getImageUrl(
-                        user.banner
-                      )!,
-                  }}
-                  style={
-                    styles.bannerImage
-                  }
-                />
-              ) : (
-                <View
-                  style={
-                    styles.bannerPlaceholder
-                  }
-                >
-                  <Feather
-                    name="image"
-                    size={35}
-                    color="#0099FF"
-                  />
-                </View>
-              )}
-            </View>
-
-            {/* DADOS DO USUÁRIO */}
-
-            <View
-              style={
-                styles.profileInfoContainer
-              }
-            >
-              <View
-                style={
-                  styles.roundAvatar
-                }
-              >
-                {getImageUrl(
-                  user.fotoPerfil
-                ) ? (
-                  <Image
-                    source={{
-                      uri:
-                        getImageUrl(
-                          user.fotoPerfil
-                        )!,
-                    }}
-                    style={
-                      styles.profileImage
-                    }
-                  />
-                ) : (
-                  <Feather
-                    name="user"
-                    size={45}
-                    color="#005386"
-                  />
-                )}
-              </View>
-
-              <View
-                style={
-                  styles.userInfoTextContainer
-                }
-              >
-                <Text
-                  style={
-                    styles.userName
-                  }
-                >
-                  {user.name}
-                </Text>
-
-                <View
-                  style={
-                    styles.addressRow
-                  }
-                >
-                  <Feather
-                    name="file-text"
-                    size={12}
-                    color="#0099FF"
-                    style={
-                      styles.addressIcon
-                    }
-                  />
-
-                  <Text
-                    style={
-                      styles.userSubtext
-                    }
-                    numberOfLines={2}
-                  >
-                    {user.description}
-                  </Text>
-                </View>
-
-                {/* EDITAR PERFIL */}
-
-                <TouchableOpacity
-                  style={
-                    styles.editProfileButton
-                  }
-                  onPress={() =>
-                    router.push(
-                      "/perfil/editarPerfil" as any
-                    )
-                  }
-                  activeOpacity={0.7}
-                >
-                  <Feather
-                    name="edit-3"
-                    size={14}
-                    color="#FFFFFF"
-                  />
-
-                  <Text
-                    style={
-                      styles.editProfileText
-                    }
-                  >
-                    Editar perfil
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* AVALIAÇÃO */}
-
-            <View
-              style={
-                styles.ratingContainer
-              }
-            >
-              <View
-                style={
-                  styles.starsRow
-                }
-              >
-                <Feather
-                  name="star"
-                  size={18}
-                  color="#005386"
-                  style={
-                    styles.starIcon
-                  }
-                />
-
-                <Feather
-                  name="star"
-                  size={18}
-                  color="#005386"
-                  style={
-                    styles.starIcon
-                  }
-                />
-
-                <Feather
-                  name="star"
-                  size={18}
-                  color="#005386"
-                  style={
-                    styles.starIcon
-                  }
-                />
-
-                <Feather
-                  name="star"
-                  size={18}
-                  color="#005386"
-                  style={
-                    styles.starIcon
-                  }
-                />
-
-                <Feather
-                  name="star"
-                  size={18}
-                  color="#005386"
-                />
-              </View>
-
-              <Text
-                style={
-                  styles.ratingText
-                }
-              >
-                — {user.rating}
-              </Text>
-            </View>
-
-            {/* ABAS */}
-
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={
-                false
-              }
-              style={
-                styles.tabsContainer
-              }
-            >
-              {/* ANÚNCIOS */}
-
-              <TouchableOpacity
-                style={[
-                  styles.tabItem,
-                  activeTab ===
-                    "anuncios" &&
-                    styles.activeTab,
-                ]}
-                onPress={() =>
-                  handleChangeTab(
-                    "anuncios"
-                  )
-                }
-              >
-                <Text
-                  style={[
-                    styles.tabText,
-                    activeTab ===
-                      "anuncios" &&
-                      styles.activeTabText,
-                  ]}
-                >
-                  Anúncios
-                </Text>
-              </TouchableOpacity>
-
-              {/* TROCADOS */}
-
-              <TouchableOpacity
-                style={[
-                  styles.tabItem,
-                  activeTab ===
-                    "trocados" &&
-                    styles.activeTab,
-                ]}
-                onPress={() =>
-                  handleChangeTab(
-                    "trocados"
-                  )
-                }
-              >
-                <Text
-                  style={[
-                    styles.tabText,
-                    activeTab ===
-                      "trocados" &&
-                      styles.activeTabText,
-                  ]}
-                >
-                  Anúncios trocados
-                </Text>
-              </TouchableOpacity>
-
-              {/* FAVORITOS */}
-
-              <TouchableOpacity
-                style={[
-                  styles.tabItem,
-                  styles.favoriteTabItem,
-                ]}
-                onPress={() =>
-                  handleChangeTab(
-                    "favoritos"
-                  )
-                }
-              >
-                <Text
-                  style={
-                    styles.tabText
-                  }
-                >
-                  Favoritos
-                </Text>
-              </TouchableOpacity>
-            </ScrollView>
-          </View>
-        }
+        columnWrapperStyle={styles.gridRow}
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+        ListHeaderComponent={ListHeader}
+        renderItem={renderItem}
+        initialNumToRender={6}
+        maxToRenderPerBatch={8}
+        windowSize={7}
+        removeClippedSubviews={Platform.OS !== "web"}
         ListEmptyComponent={
-          loadingProducts ? (
-            <ActivityIndicator
-              size="large"
-              color="#0099FF"
-              style={{
-                marginTop: 30,
-              }}
-            />
+          loading && userProducts.length === 0 ? (
+            <View style={styles.skeletonGrid}>
+              <View style={styles.gridRow}>
+                <SkeletonCard />
+                <SkeletonCard />
+              </View>
+              <View style={styles.gridRow}>
+                <SkeletonCard />
+                <SkeletonCard />
+              </View>
+            </View>
           ) : (
-            <Text
-              style={
-                styles.emptyText
-              }
-            >
-              {emptyMessage}
-            </Text>
+            <Text style={styles.emptyText}>{emptyMessage}</Text>
           )
         }
-        renderItem={({
-          item,
-        }) => {
-          const imagemUrl =
-            item.images &&
-            item.images.length > 0
-              ? getImageUrl(
-                  item.images[0]
-                    ?.ds_imagem
-                )
-              : null;
-
-          const categoriaNome =
-            item.categoria
-              ?.nm_categoria ||
-            "Sem categoria";
-
-          return (
+        ListFooterComponent={
+          temMais ? (
             <TouchableOpacity
-              style={
-                styles.listingCard
-              }
+              style={styles.loadMoreButton}
+              onPress={carregarMais}
               activeOpacity={0.8}
-              onPress={() =>
-                handleOpenAdOptions(
-                  item
-                )
-              }
             >
-              {/* IMAGEM */}
-
-              <View
-                style={
-                  styles.imagePlaceholder
-                }
-              >
-                {imagemUrl ? (
-                  <Image
-                    source={{
-                      uri: imagemUrl,
-                    }}
-                    style={
-                      styles.productImage
-                    }
-                  />
-                ) : (
-                  <Feather
-                    name="package"
-                    size={32}
-                    color="#0099FF"
-                  />
-                )}
-              </View>
-
-              {/* INFORMAÇÕES */}
-
-              <View
-                style={
-                  styles.textPlaceholderRow
-                }
-              >
-                <Text
-                  style={
-                    styles.listingTitle
-                  }
-                  numberOfLines={1}
-                >
-                  {item.nm_produto}
-                </Text>
-
-                <Text
-                  style={
-                    styles.listingCategory
-                  }
-                  numberOfLines={1}
-                >
-                  {categoriaNome}
-                </Text>
-
-                <View
-                  style={
-                    styles.cardFooterRow
-                  }
-                >
-                  <Text
-                    style={
-                      styles.listingPrice
-                    }
-                  >
-                    {getConditionLabel(
-                      item.st_condicao
-                    )}
-                  </Text>
-
-                  <TouchableOpacity
-                    style={
-                      styles.moreOptionsButton
-                    }
-                    onPress={() =>
-                      handleOpenAdOptions(
-                        item
-                      )
-                    }
-                    hitSlop={{
-                      top: 10,
-                      bottom: 10,
-                      left: 10,
-                      right: 10,
-                    }}
-                  >
-                    <Feather
-                      name="more-vertical"
-                      size={18}
-                      color="#005386"
-                    />
-                  </TouchableOpacity>
-                </View>
-              </View>
+              <Text style={styles.loadMoreText}>
+                Ver mais ({displayedProducts.length - limiteVisivel})
+              </Text>
+              <Feather name="chevron-down" size={16} color="#005386" />
             </TouchableOpacity>
-          );
-        }}
+          ) : null
+        }
       />
 
       {/* MODAL DE OPÇÕES */}
-
       <Modal
         animationType="fade"
         transparent
-        visible={
-          optionsModalVisible
-        }
-        onRequestClose={() =>
-          setOptionsModalVisible(
-            false
-          )
-        }
+        visible={optionsModalVisible}
+        onRequestClose={() => setOptionsModalVisible(false)}
       >
         <TouchableOpacity
-          style={
-            styles.adModalOverlay
-          }
+          style={styles.adModalOverlay}
           activeOpacity={1}
-          onPress={() =>
-            setOptionsModalVisible(
-              false
-            )
-          }
+          onPress={() => setOptionsModalVisible(false)}
         >
-          <View
-            style={
-              styles.adModalContent
-            }
-          >
-            <Text
-              style={
-                styles.adModalTitle
-              }
-              numberOfLines={1}
-            >
+          <View style={styles.adModalContent}>
+            <Text style={styles.adModalTitle} numberOfLines={1}>
               {selectedAd?.nm_produto}
             </Text>
-
-            <Text
-              style={
-                styles.adModalSubtitle
-              }
-            >
+            <Text style={styles.adModalSubtitle}>
               Escolha a ação desejada:
             </Text>
 
-            {/* EDITAR */}
-
-            {selectedAd?.st_status !==
-              "T" && (
+            {selectedAd?.st_status !== "T" && (
               <TouchableOpacity
-                style={
-                  styles.adOptionButton
-                }
-                onPress={
-                  handleEditAd
-                }
+                style={styles.adOptionButton}
+                onPress={handleEditAd}
               >
-                <Feather
-                  name="edit-3"
-                  size={20}
-                  color="#005386"
-                />
-
-                <Text
-                  style={
-                    styles.adOptionText
-                  }
-                >
-                  Editar Anúncio
-                </Text>
+                <Feather name="edit-3" size={20} color="#005386" />
+                <Text style={styles.adOptionText}>Editar Anúncio</Text>
               </TouchableOpacity>
             )}
 
-            {/* ALTERAR STATUS */}
-
             <TouchableOpacity
-              style={
-                styles.adOptionButton
-              }
+              style={styles.adOptionButton}
               onPress={() => {
-                setOptionsModalVisible(
-                  false
-                );
-
-                setStatusModalVisible(
-                  true
-                );
+                setOptionsModalVisible(false);
+                setStatusModalVisible(true);
               }}
             >
-              <Feather
-                name="sliders"
-                size={20}
-                color="#005386"
-              />
-
-              <Text
-                style={
-                  styles.adOptionText
-                }
-              >
-                Alterar Status do Item
-              </Text>
+              <Feather name="sliders" size={20} color="#005386" />
+              <Text style={styles.adOptionText}>Alterar Status do Item</Text>
             </TouchableOpacity>
 
-            {/* EXCLUIR */}
-
             <TouchableOpacity
-              style={[
-                styles.adOptionButton,
-                styles.adOptionDeleteButton,
-              ]}
-              onPress={
-                handleOpenDeleteModal
-              }
+              style={[styles.adOptionButton, styles.adOptionDeleteButton]}
+              onPress={handleOpenDeleteModal}
             >
-              <Feather
-                name="trash-2"
-                size={20}
-                color="#FF3B30"
-              />
-
-              <Text
-                style={[
-                  styles.adOptionText,
-                  styles.adOptionDeleteText,
-                ]}
-              >
+              <Feather name="trash-2" size={20} color="#FF3B30" />
+              <Text style={[styles.adOptionText, styles.adOptionDeleteText]}>
                 Excluir Anúncio
               </Text>
             </TouchableOpacity>
 
-            {/* CANCELAR */}
-
             <TouchableOpacity
-              style={
-                styles.adCancelButton
-              }
-              onPress={() =>
-                setOptionsModalVisible(
-                  false
-                )
-              }
+              style={styles.adCancelButton}
+              onPress={() => setOptionsModalVisible(false)}
             >
-              <Text
-                style={
-                  styles.adCancelText
-                }
-              >
-                Cancelar
-              </Text>
+              <Text style={styles.adCancelText}>Cancelar</Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
       </Modal>
 
       {/* MODAL DE STATUS */}
-
       <Modal
         animationType="fade"
         transparent
-        visible={
-          statusModalVisible
-        }
-        onRequestClose={() =>
-          setStatusModalVisible(
-            false
-          )
-        }
+        visible={statusModalVisible}
+        onRequestClose={() => setStatusModalVisible(false)}
       >
         <TouchableOpacity
-          style={
-            styles.adModalOverlay
-          }
+          style={styles.adModalOverlay}
           activeOpacity={1}
-          onPress={() =>
-            setStatusModalVisible(
-              false
-            )
-          }
+          onPress={() => setStatusModalVisible(false)}
         >
-          <View
-            style={
-              styles.adModalContent
-            }
-          >
-            <Text
-              style={
-                styles.adModalTitle
-              }
-            >
-              Alterar Status
-            </Text>
-
-            <Text
-              style={
-                styles.adModalSubtitle
-              }
-            >
+          <View style={styles.adModalContent}>
+            <Text style={styles.adModalTitle}>Alterar Status</Text>
+            <Text style={styles.adModalSubtitle}>
               Selecione o estado atual do produto:
             </Text>
 
-            <TouchableOpacity
-              style={
-                styles.adOptionButton
-              }
-              onPress={() =>
-                handleUpdateStatus(
-                  "Disponível"
-                )
-              }
-            >
-              <Feather
-                name="check-circle"
-                size={20}
-                color="#28A745"
-              />
-
-              <Text
-                style={
-                  styles.adOptionText
-                }
+            {[
+              ["Disponível", "check-circle", "#28A745"],
+              ["Em Negociação", "clock", "#FF9900"],
+              ["Trocado", "x-circle", "#6C757D"],
+            ].map(([label, icon, color]) => (
+              <TouchableOpacity
+                key={label}
+                style={styles.adOptionButton}
+                onPress={() => handleUpdateStatus(label)}
+                disabled={processando}
               >
-                Disponível
-              </Text>
-            </TouchableOpacity>
+                <Feather name={icon as any} size={20} color={color} />
+                <Text style={styles.adOptionText}>{label}</Text>
+              </TouchableOpacity>
+            ))}
 
             <TouchableOpacity
-              style={
-                styles.adOptionButton
-              }
-              onPress={() =>
-                handleUpdateStatus(
-                  "Em Negociação"
-                )
-              }
+              style={styles.adCancelButton}
+              onPress={() => setStatusModalVisible(false)}
+              disabled={processando}
             >
-              <Feather
-                name="clock"
-                size={20}
-                color="#FF9900"
-              />
-
-              <Text
-                style={
-                  styles.adOptionText
-                }
-              >
-                Em Negociação
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={
-                styles.adOptionButton
-              }
-              onPress={() =>
-                handleUpdateStatus(
-                  "Trocado"
-                )
-              }
-            >
-              <Feather
-                name="x-circle"
-                size={20}
-                color="#6C757D"
-              />
-
-              <Text
-                style={
-                  styles.adOptionText
-                }
-              >
-                Trocado
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={
-                styles.adCancelButton
-              }
-              onPress={() =>
-                setStatusModalVisible(
-                  false
-                )
-              }
-            >
-              <Text
-                style={
-                  styles.adCancelText
-                }
-              >
-                Cancelar
-              </Text>
+              <Text style={styles.adCancelText}>Cancelar</Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
       </Modal>
 
       {/* MODAL DE EXCLUSÃO */}
-
       <Modal
         animationType="fade"
         transparent
-        visible={
-          deleteModalVisible
-        }
-        onRequestClose={() =>
-          setDeleteModalVisible(
-            false
-          )
-        }
+        visible={deleteModalVisible}
+        onRequestClose={() => setDeleteModalVisible(false)}
       >
-        <View
-          style={
-            styles.modalOverlay
-          }
-        >
-          <View
-            style={
-              styles.modalContent
-            }
-          >
-            <Text
-              style={
-                styles.deleteModalTitle
-              }
-            >
-              Confirmar Exclusão
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.deleteModalTitle}>Confirmar Exclusão</Text>
+            <Text style={styles.deleteModalSubtitle}>
+              Tem certeza que deseja remover o anúncio "{selectedAd?.nm_produto}
+              "? Esta ação não pode ser desfeita.
             </Text>
 
-            <Text
-              style={
-                styles.deleteModalSubtitle
-              }
-            >
-              Tem certeza que deseja remover o anúncio "
-              {selectedAd?.nm_produto}"? Esta ação não pode
-              ser desfeita.
-            </Text>
-
-            <View
-              style={
-                styles.modalButtonsRow
-              }
-            >
+            <View style={styles.modalButtonsRow}>
               <TouchableOpacity
-                style={
-                  styles.cancelLogoutButton
-                }
-                onPress={() =>
-                  setDeleteModalVisible(
-                    false
-                  )
-                }
+                style={styles.cancelLogoutButton}
+                onPress={() => setDeleteModalVisible(false)}
+                disabled={processando}
               >
-                <Text
-                  style={
-                    styles.cancelLogoutText
-                  }
-                >
-                  Cancelar
-                </Text>
+                <Text style={styles.cancelLogoutText}>Cancelar</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={
-                  styles.confirmDeleteButton
-                }
-                onPress={
-                  handleConfirmDelete
-                }
+                style={styles.confirmDeleteButton}
+                onPress={handleConfirmDelete}
+                disabled={processando}
               >
-                <Text
-                  style={
-                    styles.confirmDeleteText
-                  }
-                >
-                  Excluir
-                </Text>
+                {processando ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <Text style={styles.confirmDeleteText}>Excluir</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
 
-      {/* MODAL DE LOGOUT */}
-
+      {/* MODAL DE LOGOUT (oculto, caso queira usar depois) */}
       <Modal
         animationType="fade"
         transparent
-        visible={
-          logoutModalVisible
-        }
-        onRequestClose={() =>
-          setLogoutModalVisible(
-            false
-          )
-        }
+        visible={logoutModalVisible}
+        onRequestClose={() => setLogoutModalVisible(false)}
       >
-        <View
-          style={
-            styles.modalOverlay
-          }
-        >
-          <View
-            style={
-              styles.modalContent
-            }
-          >
-            <Text
-              style={
-                styles.logoutModalTitle
-              }
-            >
-              Deseja sair da conta?
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.logoutModalTitle}>Deseja sair da conta?</Text>
+            <Text style={styles.logoutModalSubtitle}>
+              Ao confirmar, sua sessão atual será encerrada com segurança.
             </Text>
 
-            <Text
-              style={
-                styles.logoutModalSubtitle
-              }
-            >
-              Ao confirmar, sua sessão atual será encerrada
-              com segurança e você retornará à tela inicial.
-            </Text>
-
-            <View
-              style={
-                styles.modalButtonsRow
-              }
-            >
+            <View style={styles.modalButtonsRow}>
               <TouchableOpacity
-                style={
-                  styles.cancelLogoutButton
-                }
-                onPress={() =>
-                  setLogoutModalVisible(
-                    false
-                  )
-                }
+                style={styles.cancelLogoutButton}
+                onPress={() => setLogoutModalVisible(false)}
               >
-                <Text
-                  style={
-                    styles.cancelLogoutText
-                  }
-                >
-                  Cancelar
-                </Text>
+                <Text style={styles.cancelLogoutText}>Cancelar</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={
-                  styles.confirmLogoutButton
-                }
+                style={styles.confirmLogoutButton}
                 onPress={async () => {
-                  setLogoutModalVisible(
-                    false
-                  );
-
+                  setLogoutModalVisible(false);
                   await sairDaConta();
                 }}
               >
-                <Text
-                  style={
-                    styles.confirmLogoutText
-                  }
-                >
-                  Sair
-                </Text>
+                <Text style={styles.confirmLogoutText}>Sair</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1727,10 +1117,8 @@ export default function ProfileScreen() {
 // ============================================================
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#fff",
-  },
+  container: { flex: 1, backgroundColor: "#fff" },
+
   header: {
     height: 60,
     flexDirection: "row",
@@ -1741,13 +1129,14 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#EEEEEE",
   },
-  headerButton: {
-    padding: 6,
-  },
+  headerButton: { padding: 6 },
+
   listContent: {
     paddingHorizontal: 16,
     paddingBottom: 30,
   },
+
+  // ============ BANNER ============
   bannerContainer: {
     width: "100%",
     height: 150,
@@ -1756,11 +1145,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     backgroundColor: "#E4F8FF",
   },
-  bannerImage: {
-    width: "100%",
-    height: "100%",
-    resizeMode: "cover",
-  },
+  bannerImage: { width: "100%", height: "100%" },
   bannerPlaceholder: {
     width: "100%",
     height: "100%",
@@ -1768,6 +1153,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "#E4F8FF",
   },
+
+  // ============ PERFIL ============
   profileInfoContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -1785,15 +1172,8 @@ const styles = StyleSheet.create({
     elevation: 3,
     overflow: "hidden",
   },
-  profileImage: {
-    width: "100%",
-    height: "100%",
-    resizeMode: "cover",
-  },
-  userInfoTextContainer: {
-    marginLeft: 16,
-    flex: 1,
-  },
+  profileImage: { width: "100%", height: "100%" },
+  userInfoTextContainer: { marginLeft: 16, flex: 1 },
   userName: {
     fontFamily: "Montserrat_700Bold",
     fontSize: 19,
@@ -1804,9 +1184,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 4,
   },
-  addressIcon: {
-    marginRight: 4,
-  },
+  addressIcon: { marginRight: 4 },
   userSubtext: {
     fontFamily: "Montserrat_400Regular",
     fontSize: 13,
@@ -1830,25 +1208,24 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     marginLeft: 5,
   },
+
+  // ============ AVALIAÇÃO ============
   ratingContainer: {
     flexDirection: "row",
     alignItems: "center",
     marginTop: 15,
     paddingLeft: 4,
   },
-  starsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  starIcon: {
-    marginRight: 4,
-  },
+  starsRow: { flexDirection: "row", alignItems: "center" },
+  starIcon: { marginRight: 4 },
   ratingText: {
     fontFamily: "Montserrat_600SemiBold",
     fontSize: 14,
     color: "#005386",
     marginLeft: 8,
   },
+
+  // ============ ABAS ============
   tabsContainer: {
     marginVertical: 20,
     borderBottomWidth: 1,
@@ -1861,12 +1238,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
   },
-  favoriteTabItem: {
-    marginRight: 8,
-  },
-  favoriteIcon: {
-    marginRight: 5,
-  },
+  favoriteTabItem: { marginRight: 8 },
   activeTab: {
     borderBottomWidth: 2,
     borderBottomColor: "#0099FF",
@@ -1880,11 +1252,13 @@ const styles = StyleSheet.create({
     fontFamily: "Montserrat_700Bold",
     color: "#005386",
   },
+
+  // ============ GRID ============
   gridRow: {
     justifyContent: "space-between",
   },
   listingCard: {
-    width: itemWidth,
+    width: ITEM_WIDTH,
     marginBottom: 20,
     backgroundColor: "#FFFFFF",
     borderRadius: 14,
@@ -1895,16 +1269,12 @@ const styles = StyleSheet.create({
   },
   imagePlaceholder: {
     width: "100%",
-    height: itemWidth,
+    height: ITEM_WIDTH,
     backgroundColor: "#F5FBFF",
     justifyContent: "center",
     alignItems: "center",
   },
-  productImage: {
-    width: "100%",
-    height: "100%",
-    resizeMode: "cover",
-  },
+  productImage: { width: "100%", height: "100%" },
   textPlaceholderRow: {
     marginTop: 8,
     paddingHorizontal: 8,
@@ -1932,9 +1302,14 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: "#777777",
   },
-  moreOptionsButton: {
-    padding: 4,
-  },
+  moreOptionsButton: { padding: 4 },
+
+  // ============ SKELETON ============
+  skeletonGrid: { gap: 0 },
+  skeletonBlock: { backgroundColor: "#EAF3FA" },
+  skeletonLine: { backgroundColor: "#EAF3FA", borderRadius: 4 },
+
+  // ============ EMPTY ============
   emptyText: {
     textAlign: "center",
     fontFamily: "Montserrat_400Regular",
@@ -1942,6 +1317,27 @@ const styles = StyleSheet.create({
     marginTop: 40,
     fontSize: 14,
   },
+
+  // ============ LOAD MORE ============
+  loadMoreButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: "#F1FAFF",
+    borderWidth: 1,
+    borderColor: "#DCEEFA",
+    marginTop: 8,
+    gap: 6,
+  },
+  loadMoreText: {
+    fontSize: 13,
+    color: "#005386",
+    fontFamily: "Montserrat_600SemiBold",
+  },
+
+  // ============ MODAIS ============
   adModalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0, 0, 0, 0.4)",
@@ -1982,12 +1378,8 @@ const styles = StyleSheet.create({
     color: "#005386",
     marginLeft: 12,
   },
-  adOptionDeleteButton: {
-    backgroundColor: "#FFF0F0",
-  },
-  adOptionDeleteText: {
-    color: "#FF3B30",
-  },
+  adOptionDeleteButton: { backgroundColor: "#FFF0F0" },
+  adOptionDeleteText: { color: "#FF3B30" },
   adCancelButton: {
     marginTop: 6,
     paddingVertical: 10,
@@ -1999,6 +1391,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#888888",
   },
+
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0, 0, 0, 0.5)",
