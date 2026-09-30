@@ -2,27 +2,45 @@ import {
   Feather,
   MaterialCommunityIcons,
 } from "@expo/vector-icons";
+
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useLocalSearchParams, useRouter } from "expo-router";
+
+import {
+  useLocalSearchParams,
+  useRouter,
+} from "expo-router";
+
 import { StatusBar } from "expo-status-bar";
-import React, { useEffect, useState } from "react";
+
+import React, {
+  useEffect,
+  useState,
+} from "react";
+
 import {
   ActivityIndicator,
   Alert,
   Dimensions,
   FlatList,
   Image,
-  Platform,
+  Modal,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+
+import {
+  SafeAreaView,
+} from "react-native-safe-area-context";
+
 import api from "../../services/api";
 
-const { width } = Dimensions.get("window");
-const itemWidth = (width - 44) / 2;
+const { width } =
+  Dimensions.get("window");
+
+const itemWidth =
+  (width - 44) / 2;
 
 /* ================================================================
    TIPAGEM DO PRODUTO
@@ -30,20 +48,31 @@ const itemWidth = (width - 44) / 2;
 
 interface Produto {
   id_produto: number;
+
   id_usuario?: number;
+
   id_categoria?: number;
+
   nm_produto?: string;
+
   ds_produto?: string | null;
+
   st_condicao?: string;
+
   st_status?: string;
+
   categoria?: {
     nm_categoria?: string;
+
     ds_categoria?: string;
+
     nome?: string;
   };
+
   images?: {
     ds_imagem: string;
   }[];
+
   imagem?: {
     ds_imagem: string;
   };
@@ -55,14 +84,21 @@ interface Produto {
 
 interface UserProfileData {
   id_usuario?: number | string;
+
   name: string;
+
   description: string;
+
   rating: string;
+
   fotoPerfil: string | null;
+
   banner: string | null;
 }
 
-type TabType = "anuncios" | "trocados";
+type TabType =
+  | "anuncios"
+  | "trocados";
 
 /* ================================================================
    TELA
@@ -70,353 +106,610 @@ type TabType = "anuncios" | "trocados";
 
 export default function VisualizarPerfilScreen() {
   const router = useRouter();
-  const { id } = useLocalSearchParams();
+
+  const { id } =
+    useLocalSearchParams();
+
+  const idParametro =
+    Array.isArray(id)
+      ? id[0]
+      : id;
 
   /* ==============================================================
-     USUÁRIO
+     USUÁRIO LOGADO
   ============================================================== */
 
-  const [user, setUser] =
+  const [
+    idUsuarioLogado,
+    setIdUsuarioLogado,
+  ] = useState<
+    number | null
+  >(null);
+
+  const [
+    usuarioLogadoCarregado,
+    setUsuarioLogadoCarregado,
+  ] = useState(false);
+
+  /* ==============================================================
+     USUÁRIO DO PERFIL
+  ============================================================== */
+
+  const [
+    user,
+    setUser,
+  ] =
     useState<UserProfileData>({
-      id_usuario: undefined,
+      id_usuario:
+        undefined,
+
       name: "",
+
       description: "",
+
       rating: "5.0",
+
       fotoPerfil: null,
+
       banner: null,
     });
+
+  /* ==============================================================
+     VERIFICAR SE É O PRÓPRIO PERFIL
+  ============================================================== */
+
+  const idPerfilVisualizado =
+    Number(
+      user.id_usuario ||
+        idParametro ||
+        0
+    );
+
+  const isOwnProfile =
+    idUsuarioLogado !==
+      null &&
+    idPerfilVisualizado ===
+      idUsuarioLogado;
 
   /* ==============================================================
      PRODUTOS
   ============================================================== */
 
-  const [userProducts, setUserProducts] =
+  const [
+    userProducts,
+    setUserProducts,
+  ] =
     useState<Produto[]>([]);
 
-  const [loadingProducts, setLoadingProducts] =
-    useState(true);
+  const [
+    loadingProducts,
+    setLoadingProducts,
+  ] = useState(true);
 
   /* ==============================================================
      ABA
   ============================================================== */
 
-  const [activeTab, setActiveTab] =
-    useState<TabType>("anuncios");
+  const [
+    activeTab,
+    setActiveTab,
+  ] =
+    useState<TabType>(
+      "anuncios"
+    );
 
   /* ==============================================================
      BLOQUEIO
   ============================================================== */
 
-  const [bloqueando, setBloqueando] =
-    useState(false);
+  const [
+    bloqueando,
+    setBloqueando,
+  ] = useState(false);
+
+  const [
+    modalBloqueioVisivel,
+    setModalBloqueioVisivel,
+  ] = useState(false);
+
+  /* ==============================================================
+     CARREGAR USUÁRIO LOGADO
+  ============================================================== */
+
+  useEffect(() => {
+    const carregarUsuarioLogado =
+      async () => {
+        try {
+          const usuarioStorage =
+            await AsyncStorage.getItem(
+              "usuario"
+            );
+
+          if (
+            !usuarioStorage
+          ) {
+            return;
+          }
+
+          const parsed =
+            JSON.parse(
+              usuarioStorage
+            );
+
+          const usuario =
+            parsed?.user ||
+            parsed?.usuario ||
+            parsed?.data ||
+            parsed;
+
+          const idLogado =
+            usuario?.id_usuario ||
+            usuario?.id ||
+            null;
+
+          if (idLogado) {
+            setIdUsuarioLogado(
+              Number(
+                idLogado
+              )
+            );
+          }
+        } catch (
+          error
+        ) {
+          console.error(
+            "ERRO AO CARREGAR USUÁRIO LOGADO:",
+            error
+          );
+        } finally {
+          setUsuarioLogadoCarregado(
+            true
+          );
+        }
+      };
+
+    carregarUsuarioLogado();
+  }, []);
 
   /* ==============================================================
      CARREGAR PERFIL
   ============================================================== */
 
   useEffect(() => {
-    const carregarPerfil = async () => {
-      try {
-        if (!id) {
-          return;
-        }
-
-        const token =
-          await AsyncStorage.getItem("token");
-
-        const response = await api.get(
-          `/users/${id}`,
-          {
-            headers: {
-              Accept: "application/json",
-              ...(token
-                ? {
-                    Authorization: `Bearer ${token}`,
-                  }
-                : {}),
-            },
+    const carregarPerfil =
+      async () => {
+        try {
+          if (
+            !idParametro
+          ) {
+            return;
           }
-        );
 
-        const data = response.data;
+          const token =
+            await AsyncStorage.getItem(
+              "token"
+            );
 
-        const usuario =
-          data?.user ||
-          data?.usuario ||
-          data?.data ||
-          data;
+          const response =
+            await api.get(
+              `/users/${idParametro}`,
+              {
+                headers: {
+                  Accept:
+                    "application/json",
 
-        if (!usuario) {
-          return;
+                  ...(token
+                    ? {
+                        Authorization: `Bearer ${token}`,
+                      }
+                    : {}),
+                },
+              }
+            );
+
+          const data =
+            response.data;
+
+          const usuario =
+            data?.user ||
+            data?.usuario ||
+            data?.data ||
+            data;
+
+          if (!usuario) {
+            return;
+          }
+
+          setUser({
+            id_usuario:
+              usuario?.id_usuario ||
+              usuario?.id ||
+              idParametro,
+
+            name:
+              usuario?.nm_usuario ||
+              usuario?.nome ||
+              usuario?.name ||
+              "Usuário",
+
+            description:
+              usuario?.ds_usuario ||
+              usuario?.ds_biografia ||
+              usuario?.ds_bio ||
+              usuario?.biografia ||
+              usuario?.bio ||
+              "Descrição não informada",
+
+            rating:
+              usuario?.rating ||
+              usuario?.avaliacao ||
+              "5.0",
+
+            fotoPerfil:
+              usuario?.ds_foto_perfil ||
+              usuario?.ds_foto ||
+              usuario?.foto_perfil ||
+              usuario?.foto ||
+              null,
+
+            banner:
+              usuario?.ds_banner ||
+              usuario?.banner ||
+              null,
+          });
+        } catch (
+          error: any
+        ) {
+          console.error(
+            "ERRO AO CARREGAR PERFIL:",
+            error
+          );
         }
-
-        setUser({
-          id_usuario:
-            usuario?.id_usuario ||
-            usuario?.id ||
-            id,
-
-          name:
-            usuario?.nm_usuario ||
-            usuario?.nome ||
-            usuario?.name ||
-            "Usuário",
-
-          description:
-            usuario?.ds_usuario ||
-            usuario?.ds_biografia ||
-            usuario?.ds_bio ||
-            usuario?.biografia ||
-            usuario?.bio ||
-            "Descrição não informada",
-
-          rating:
-            usuario?.rating ||
-            usuario?.avaliacao ||
-            "5.0",
-
-          fotoPerfil:
-            usuario?.ds_foto_perfil ||
-            usuario?.ds_foto ||
-            usuario?.foto_perfil ||
-            usuario?.foto ||
-            null,
-
-          banner:
-            usuario?.ds_banner ||
-            usuario?.banner ||
-            null,
-        });
-      } catch (error: any) {
-        console.error(
-          "ERRO AO CARREGAR PERFIL:",
-          error
-        );
-      }
-    };
+      };
 
     carregarPerfil();
-  }, [id]);
+  }, [idParametro]);
 
   /* ==============================================================
      CARREGAR PRODUTOS DO USUÁRIO
   ============================================================== */
 
   useEffect(() => {
-    const carregarProdutos = async () => {
-      try {
-        if (!id) {
-          return;
-        }
-
-        setLoadingProducts(true);
-
-        const token =
-          await AsyncStorage.getItem("token");
-
-        const response = await api.get(
-          `/users/${id}/products`,
-          {
-            headers: {
-              Accept: "application/json",
-              ...(token
-                ? {
-                    Authorization: `Bearer ${token}`,
-                  }
-                : {}),
-            },
+    const carregarProdutos =
+      async () => {
+        try {
+          if (
+            !idParametro
+          ) {
+            return;
           }
-        );
 
-        const data = response.data;
+          setLoadingProducts(
+            true
+          );
 
-        const produtos =
-          Array.isArray(data)
-            ? data
-            : data?.products ||
-              data?.produtos ||
-              data?.data ||
-              [];
+          const token =
+            await AsyncStorage.getItem(
+              "token"
+            );
 
-        setUserProducts(produtos);
-      } catch (error) {
-        console.error(
-          "ERRO AO CARREGAR ANÚNCIOS:",
+          const response =
+            await api.get(
+              `/users/${idParametro}/products`,
+              {
+                headers: {
+                  Accept:
+                    "application/json",
+
+                  ...(token
+                    ? {
+                        Authorization: `Bearer ${token}`,
+                      }
+                    : {}),
+                },
+              }
+            );
+
+          const data =
+            response.data;
+
+          const produtos =
+            Array.isArray(
+              data
+            )
+              ? data
+              : data?.products ||
+                data?.produtos ||
+                data?.data ||
+                [];
+
+          setUserProducts(
+            produtos
+          );
+        } catch (
           error
-        );
+        ) {
+          console.error(
+            "ERRO AO CARREGAR ANÚNCIOS:",
+            error
+          );
 
-        setUserProducts([]);
-      } finally {
-        setLoadingProducts(false);
-      }
-    };
+          setUserProducts(
+            []
+          );
+        } finally {
+          setLoadingProducts(
+            false
+          );
+        }
+      };
 
     carregarProdutos();
-  }, [id]);
+  }, [idParametro]);
 
   /* ==============================================================
-     BLOQUEAR USUÁRIO
+     ABRIR MODAL DE BLOQUEIO
   ============================================================== */
 
-  const bloquearUsuario = () => {
-    const idUsuarioBloqueado = Number(
-      user.id_usuario || id
-    );
-
-    if (!idUsuarioBloqueado) {
-      Alert.alert(
-        "Erro",
-        "Não foi possível identificar este usuário."
-      );
-      return;
-    }
-
-    console.log(
-      "USUÁRIO QUE SERÁ BLOQUEADO:",
-      idUsuarioBloqueado
-    );
-
-    if (Platform.OS === "web") {
-      const confirmou = window.confirm(
-        `Tem certeza que deseja bloquear ${user.name}?`
-      );
-
-      if (confirmou) {
-        confirmarBloqueio();
+  const bloquearUsuario =
+    () => {
+      if (
+        isOwnProfile
+      ) {
+        return;
       }
 
-      return;
-    }
+      const idUsuarioBloqueado =
+        Number(
+          user.id_usuario ||
+            idParametro
+        );
 
-    Alert.alert(
-      "Bloquear usuário",
-      `Tem certeza que deseja bloquear ${user.name}?`,
-      [
-        {
-          text: "Cancelar",
-          style: "cancel",
-        },
-        {
-          text: "Bloquear",
-          style: "destructive",
-          onPress: confirmarBloqueio,
-        },
-      ]
-    );
-  };
+      if (
+        !idUsuarioBloqueado
+      ) {
+        Alert.alert(
+          "Erro",
+          "Não foi possível identificar este usuário."
+        );
+
+        return;
+      }
+
+      setModalBloqueioVisivel(
+        true
+      );
+    };
+
+  /* ==============================================================
+     FECHAR MODAL
+  ============================================================== */
+
+  const fecharModalBloqueio =
+    () => {
+      if (
+        bloqueando
+      ) {
+        return;
+      }
+
+      setModalBloqueioVisivel(
+        false
+      );
+    };
 
   /* ==============================================================
      CONFIRMAR BLOQUEIO
   ============================================================== */
 
-  const confirmarBloqueio = async () => {
-    const idUsuarioBloqueado = Number(
-      user.id_usuario || id
-    );
-
-    if (!idUsuarioBloqueado) {
-      Alert.alert(
-        "Erro",
-        "Não foi possível identificar este usuário."
-      );
-      return;
-    }
-
-    try {
-      setBloqueando(true);
-
-      const token =
-        await AsyncStorage.getItem("token");
-
-      if (!token) {
-        Alert.alert(
-          "Erro",
-          "Você precisa estar logado para bloquear um usuário."
+  const confirmarBloqueio =
+    async () => {
+      if (
+        isOwnProfile
+      ) {
+        setModalBloqueioVisivel(
+          false
         );
+
         return;
       }
 
-      console.log(
-        "ENVIANDO BLOQUEIO:",
-        idUsuarioBloqueado
-      );
+      const idUsuarioBloqueado =
+        Number(
+          user.id_usuario ||
+            idParametro
+        );
 
-      const response = await api.post(
-        "/bloqueios",
-        {
-          id_usuario_bloqueado:
-            idUsuarioBloqueado,
-        },
-        {
-          headers: {
-            Accept: "application/json",
-            Authorization: `Bearer ${token}`,
-          },
+      if (
+        !idUsuarioBloqueado
+      ) {
+        Alert.alert(
+          "Erro",
+          "Não foi possível identificar este usuário."
+        );
+
+        return;
+      }
+
+      try {
+        setBloqueando(
+          true
+        );
+
+        const token =
+          await AsyncStorage.getItem(
+            "token"
+          );
+
+        if (!token) {
+          setModalBloqueioVisivel(
+            false
+          );
+
+          Alert.alert(
+            "Erro",
+            "Você precisa estar logado para bloquear um usuário."
+          );
+
+          return;
         }
-      );
 
-      const data = response.data;
+        console.log(
+          "ENVIANDO BLOQUEIO:",
+          idUsuarioBloqueado
+        );
 
-      console.log(
-        "RESPOSTA BLOQUEIO:",
-        response.status,
-        data
-      );
-
-      Alert.alert(
-        "Sucesso",
-        data?.message ||
-          "Usuário bloqueado com sucesso.",
-        [
-          {
-            text: "OK",
-            onPress: () => {
-              if (router.canGoBack()) {
-                router.back();
-              } else {
-                router.replace("/(tabs)");
-              }
+        const response =
+          await api.post(
+            "/bloqueios",
+            {
+              id_usuario_bloqueado:
+                idUsuarioBloqueado,
             },
-          },
-        ]
-      );
-    } catch (error: any) {
-      console.error(
-        "ERRO AO BLOQUEAR USUÁRIO:",
-        error
-      );
+            {
+              headers: {
+                Accept:
+                  "application/json",
 
-      const mensagem =
-        error?.response?.data?.message ||
-        error?.message ||
-        "Não foi possível bloquear este usuário.";
+                Authorization:
+                  `Bearer ${token}`,
+              },
+            }
+          );
 
-      Alert.alert("Erro", mensagem);
-    } finally {
-      setBloqueando(false);
-    }
-  };
+        const data =
+          response.data;
+
+        console.log(
+          "RESPOSTA BLOQUEIO:",
+          response.status,
+          data
+        );
+
+        setModalBloqueioVisivel(
+          false
+        );
+
+        Alert.alert(
+          "Usuário bloqueado",
+          data?.message ||
+            "Usuário bloqueado com sucesso.",
+          [
+            {
+              text: "OK",
+
+              onPress:
+                () => {
+                  if (
+                    router.canGoBack()
+                  ) {
+                    router.back();
+                  } else {
+                    router.replace(
+                      "/(tabs)"
+                    );
+                  }
+                },
+            },
+          ]
+        );
+      } catch (
+        error: any
+      ) {
+        console.error(
+          "ERRO AO BLOQUEAR USUÁRIO:",
+          error
+        );
+
+        const mensagem =
+          error?.response
+            ?.data
+            ?.message ||
+          error?.message ||
+          "Não foi possível bloquear este usuário.";
+
+        Alert.alert(
+          "Erro",
+          mensagem
+        );
+      } finally {
+        setBloqueando(
+          false
+        );
+      }
+    };
+
+  /* ==============================================================
+     DENUNCIAR USUÁRIO
+  ============================================================== */
+
+  const denunciarUsuario =
+    () => {
+      if (
+        isOwnProfile
+      ) {
+        return;
+      }
+
+      const idUsuarioDenunciado =
+        user.id_usuario ||
+        idParametro;
+
+      if (
+        !idUsuarioDenunciado
+      ) {
+        Alert.alert(
+          "Erro",
+          "Não foi possível identificar este usuário."
+        );
+
+        return;
+      }
+
+      router.push({
+        pathname:
+          "/denuncia",
+
+        params: {
+          id: String(
+            idUsuarioDenunciado
+          ),
+
+          nome:
+            user.name,
+        },
+      } as any);
+    };
 
   /* ==============================================================
      URL DA IMAGEM
   ============================================================== */
 
   const getImageUrl = (
-    imagePath?: string | null
+    imagePath?:
+      | string
+      | null
   ): string | null => {
     if (!imagePath) {
       return null;
     }
 
-    const path = String(imagePath).trim();
+    const path =
+      String(
+        imagePath
+      ).trim();
 
     if (!path) {
       return null;
     }
 
     if (
-      path.startsWith("http://") ||
-      path.startsWith("https://")
+      path.startsWith(
+        "http://"
+      ) ||
+      path.startsWith(
+        "https://"
+      )
     ) {
       return path;
     }
@@ -428,9 +721,16 @@ export default function VisualizarPerfilScreen() {
       ) ||
       "http://127.0.0.1:8000";
 
-    const cleanPath = path
-      .replace(/^\/+/, "")
-      .replace(/^storage\/+/, "");
+    const cleanPath =
+      path
+        .replace(
+          /^\/+/,
+          ""
+        )
+        .replace(
+          /^storage\/+/,
+          ""
+        );
 
     return `${baseUrl}/storage/${cleanPath}`;
   };
@@ -440,67 +740,91 @@ export default function VisualizarPerfilScreen() {
   ============================================================== */
 
   const fotoPerfilUrl =
-    getImageUrl(user.fotoPerfil);
+    getImageUrl(
+      user.fotoPerfil
+    );
 
   const bannerUrl =
-    getImageUrl(user.banner);
+    getImageUrl(
+      user.banner
+    );
 
   /* ==============================================================
      CONDIÇÃO DO PRODUTO
   ============================================================== */
 
-  const getConditionLabel = (
-    condition: any
-  ) => {
-    const valor = String(condition || "")
-      .trim()
-      .toUpperCase();
+  const getConditionLabel =
+    (
+      condition: any
+    ) => {
+      const valor =
+        String(
+          condition ||
+            ""
+        )
+          .trim()
+          .toUpperCase();
 
-    switch (valor) {
-      case "N":
-      case "NOVO":
-        return "Novo";
+      switch (
+        valor
+      ) {
+        case "N":
 
-      case "S":
-      case "SEMI NOVO":
-      case "SEMINOVO":
-        return "Semi novo";
+        case "NOVO":
+          return "Novo";
 
-      case "U":
-      case "USADO":
-        return "Usado";
+        case "S":
 
-      case "Q":
-      case "QUEBRADO":
-        return "Quebrado";
+        case "SEMI NOVO":
 
-      default:
-        return "Não informado";
-    }
-  };
+        case "SEMINOVO":
+          return "Semi novo";
+
+        case "U":
+
+        case "USADO":
+          return "Usado";
+
+        case "Q":
+
+        case "QUEBRADO":
+          return "Quebrado";
+
+        default:
+          return "Não informado";
+      }
+    };
 
   /* ==============================================================
      CONTAGEM
   ============================================================== */
 
   const anunciosCount =
-    userProducts.filter((item) => {
-      const status = String(
-        item?.st_status || ""
-      ).toUpperCase();
+    userProducts.filter(
+      (item) => {
+        const status =
+          String(
+            item?.st_status ||
+              ""
+          ).toUpperCase();
 
-      return (
-        status === "A" ||
-        status === "N"
-      );
-    }).length;
+        return (
+          status ===
+            "A" ||
+          status ===
+            "N"
+        );
+      }
+    ).length;
 
   const trocadosCount =
     userProducts.filter(
       (item) =>
         String(
-          item?.st_status || ""
-        ).toUpperCase() === "T"
+          item?.st_status ||
+            ""
+        ).toUpperCase() ===
+        "T"
     ).length;
 
   /* ==============================================================
@@ -508,60 +832,81 @@ export default function VisualizarPerfilScreen() {
   ============================================================== */
 
   const displayedProducts =
-    activeTab === "trocados"
+    activeTab ===
+    "trocados"
       ? userProducts.filter(
           (item) =>
             String(
-              item?.st_status || ""
-            ).toUpperCase() === "T"
+              item?.st_status ||
+                ""
+            ).toUpperCase() ===
+            "T"
         )
-      : userProducts.filter((item) => {
-          const status = String(
-            item?.st_status || ""
-          ).toUpperCase();
+      : userProducts.filter(
+          (item) => {
+            const status =
+              String(
+                item?.st_status ||
+                  ""
+              ).toUpperCase();
 
-          return (
-            status === "A" ||
-            status === "N"
-          );
-        });
+            return (
+              status ===
+                "A" ||
+              status ===
+                "N"
+            );
+          }
+        );
 
   /* ==============================================================
      ABRIR PRODUTO
   ============================================================== */
 
-  const handleOpenProduct = (
-    produto: Produto
-  ) => {
-    const productId =
-      produto?.id_produto;
+  const handleOpenProduct =
+    (
+      produto: Produto
+    ) => {
+      const productId =
+        produto?.id_produto;
 
-    if (!productId) {
-      return;
-    }
+      if (
+        !productId
+      ) {
+        return;
+      }
 
-    const status = String(
-      produto?.st_status || ""
-    ).toUpperCase();
+      const status =
+        String(
+          produto?.st_status ||
+            ""
+        ).toUpperCase();
 
-    if (status === "T") {
-      return;
-    }
+      if (
+        status === "T"
+      ) {
+        return;
+      }
 
-    router.push({
-      pathname: "/visuanuncios",
-      params: {
-        id: String(productId),
-      },
-    } as any);
-  };
+      router.push({
+        pathname:
+          "/visuanuncios",
+
+        params: {
+          id: String(
+            productId
+          ),
+        },
+      } as any);
+    };
 
   /* ==============================================================
-     MENSAGEM DE LISTA VAZIA
+     MENSAGEM DA LISTA VAZIA
   ============================================================== */
 
   const emptyMessage =
-    activeTab === "trocados"
+    activeTab ===
+    "trocados"
       ? `${user.name} ainda não possui anúncios trocados.`
       : `${user.name} ainda não possui anúncios cadastrados.`;
 
@@ -571,23 +916,43 @@ export default function VisualizarPerfilScreen() {
 
   return (
     <SafeAreaView
-      style={styles.container}
+      style={
+        styles.container
+      }
     >
-      <StatusBar style="dark" />
+      <StatusBar
+        style="dark"
+      />
 
+      {/* ====================================================== */}
       {/* HEADER */}
-      <View style={styles.header}>
-        {/* BOTÃO VOLTAR */}
+      {/* ====================================================== */}
+
+      <View
+        style={
+          styles.header
+        }
+      >
+        {/* VOLTAR */}
+
         <TouchableOpacity
           onPress={() => {
-            if (router.canGoBack()) {
+            if (
+              router.canGoBack()
+            ) {
               router.back();
             } else {
-              router.replace("/(tabs)");
+              router.replace(
+                "/(tabs)"
+              );
             }
           }}
-          style={styles.headerButton}
-          activeOpacity={0.7}
+          style={
+            styles.headerButton
+          }
+          activeOpacity={
+            0.7
+          }
         >
           <Feather
             name="arrow-left"
@@ -596,30 +961,91 @@ export default function VisualizarPerfilScreen() {
           />
         </TouchableOpacity>
 
-        {/* BOTÃO BLOQUEAR */}
-        <TouchableOpacity
-          onPress={() => {
-            console.log(
-              "CLIQUEI NO BOTÃO DE BLOQUEAR"
-            );
-            bloquearUsuario();
-          }}
-          disabled={bloqueando}
-          style={styles.headerButton}
-          activeOpacity={0.7}
-        >
-          <MaterialCommunityIcons
-            name="block-helper"
-            size={23}
-            color="#D9534F"
+        {/* ==================================================== */}
+        {/* DENÚNCIA E BLOQUEIO */}
+        {/* ==================================================== */}
+
+        {usuarioLogadoCarregado &&
+        !isOwnProfile ? (
+          <View
+            style={
+              styles.headerActions
+            }
+          >
+            {/* DENUNCIAR */}
+
+            <TouchableOpacity
+              onPress={
+                denunciarUsuario
+              }
+              style={
+                styles.headerButton
+              }
+              activeOpacity={
+                0.7
+              }
+            >
+              <Feather
+                name="flag"
+                size={21}
+                color="#D97706"
+              />
+            </TouchableOpacity>
+
+            {/* BLOQUEAR */}
+
+            <TouchableOpacity
+              onPress={
+                bloquearUsuario
+              }
+              disabled={
+                bloqueando
+              }
+              style={[
+                styles.headerButton,
+
+                bloqueando &&
+                  styles.headerButtonDisabled,
+              ]}
+              activeOpacity={
+                0.7
+              }
+            >
+              {bloqueando ? (
+                <ActivityIndicator
+                  size="small"
+                  color="#D9534F"
+                />
+              ) : (
+                <MaterialCommunityIcons
+                  name="block-helper"
+                  size={23}
+                  color="#D9534F"
+                />
+              )}
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View
+            style={
+              styles.headerPlaceholder
+            }
           />
-        </TouchableOpacity>
+        )}
       </View>
 
+      {/* ====================================================== */}
       {/* LISTA */}
+      {/* ====================================================== */}
+
       <FlatList
-        data={displayedProducts}
-        keyExtractor={(item, index) =>
+        data={
+          displayedProducts
+        }
+        keyExtractor={(
+          item,
+          index
+        ) =>
           String(
             item?.id_produto ||
               index
@@ -636,10 +1062,11 @@ export default function VisualizarPerfilScreen() {
           false
         }
 
-        /* CABEÇALHO DO PERFIL */
+        /* CABEÇALHO */
         ListHeaderComponent={
           <View>
             {/* BANNER */}
+
             <View
               style={
                 styles.bannerContainer
@@ -669,13 +1096,15 @@ export default function VisualizarPerfilScreen() {
               )}
             </View>
 
-            {/* INFORMAÇÕES DO USUÁRIO */}
+            {/* PERFIL */}
+
             <View
               style={
                 styles.profileInfoContainer
               }
             >
               {/* FOTO */}
+
               <View
                 style={
                   styles.roundAvatar
@@ -700,6 +1129,7 @@ export default function VisualizarPerfilScreen() {
               </View>
 
               {/* NOME E DESCRIÇÃO */}
+
               <View
                 style={
                   styles.userInfoTextContainer
@@ -713,33 +1143,31 @@ export default function VisualizarPerfilScreen() {
                   {user.name}
                 </Text>
 
+                {/* DESCRIÇÃO SEM ÍCONE */}
+
                 <View
                   style={
                     styles.addressRow
                   }
                 >
-                  <Feather
-                    name="file-text"
-                    size={12}
-                    color="#0099FF"
-                    style={
-                      styles.addressIcon
-                    }
-                  />
-
                   <Text
                     style={
                       styles.userSubtext
                     }
-                    numberOfLines={2}
+                    numberOfLines={
+                      2
+                    }
                   >
-                    {user.description}
+                    {
+                      user.description
+                    }
                   </Text>
                 </View>
               </View>
             </View>
 
             {/* AVALIAÇÃO */}
+
             <View
               style={
                 styles.ratingContainer
@@ -798,20 +1226,24 @@ export default function VisualizarPerfilScreen() {
                   styles.ratingText
                 }
               >
-                — {user.rating}
+                —{" "}
+                {user.rating}
               </Text>
             </View>
 
             {/* ABAS */}
+
             <View
               style={
                 styles.tabsContainer
               }
             >
               {/* ANÚNCIOS */}
+
               <TouchableOpacity
                 style={[
                   styles.tabItem,
+
                   activeTab ===
                     "anuncios" &&
                     styles.activeTab,
@@ -821,25 +1253,35 @@ export default function VisualizarPerfilScreen() {
                     "anuncios"
                   )
                 }
-                activeOpacity={0.7}
+                activeOpacity={
+                  0.7
+                }
               >
                 <Text
                   style={[
                     styles.tabText,
+
                     activeTab ===
                       "anuncios" &&
                       styles.activeTabText,
                   ]}
                 >
-                  Anúncios ({anunciosCount})
+                  Anúncios (
+                  {
+                    anunciosCount
+                  }
+                  )
                 </Text>
               </TouchableOpacity>
 
               {/* TROCADOS */}
+
               <TouchableOpacity
                 style={[
                   styles.tabItem,
+
                   styles.favoriteTabItem,
+
                   activeTab ===
                     "trocados" &&
                     styles.activeTab,
@@ -849,17 +1291,25 @@ export default function VisualizarPerfilScreen() {
                     "trocados"
                   )
                 }
-                activeOpacity={0.7}
+                activeOpacity={
+                  0.7
+                }
               >
                 <Text
                   style={[
                     styles.tabText,
+
                     activeTab ===
                       "trocados" &&
                       styles.activeTabText,
                   ]}
                 >
-                  Anúncios trocados ({trocadosCount})
+                  Anúncios
+                  trocados (
+                  {
+                    trocadosCount
+                  }
+                  )
                 </Text>
               </TouchableOpacity>
             </View>
@@ -873,7 +1323,8 @@ export default function VisualizarPerfilScreen() {
               size="large"
               color="#0099FF"
               style={{
-                marginTop: 30,
+                marginTop:
+                  30,
               }}
             />
           ) : (
@@ -882,7 +1333,9 @@ export default function VisualizarPerfilScreen() {
                 styles.emptyText
               }
             >
-              {emptyMessage}
+              {
+                emptyMessage
+              }
             </Text>
           )
         }
@@ -913,27 +1366,36 @@ export default function VisualizarPerfilScreen() {
 
           const isTrocado =
             String(
-              item?.st_status || ""
-            ).toUpperCase() === "T";
+              item?.st_status ||
+                ""
+            ).toUpperCase() ===
+            "T";
 
           return (
             <TouchableOpacity
               style={
                 styles.listingCard
               }
-              disabled={isTrocado}
+              disabled={
+                isTrocado
+              }
               onPress={() => {
-                if (!isTrocado) {
+                if (
+                  !isTrocado
+                ) {
                   handleOpenProduct(
                     item
                   );
                 }
               }}
               activeOpacity={
-                isTrocado ? 1 : 0.8
+                isTrocado
+                  ? 1
+                  : 0.8
               }
             >
               {/* IMAGEM */}
+
               <View
                 style={
                   styles.imagePlaceholder
@@ -958,6 +1420,7 @@ export default function VisualizarPerfilScreen() {
               </View>
 
               {/* TEXTO */}
+
               <View
                 style={
                   styles.textPlaceholderRow
@@ -967,7 +1430,9 @@ export default function VisualizarPerfilScreen() {
                   style={
                     styles.listingTitle
                   }
-                  numberOfLines={1}
+                  numberOfLines={
+                    1
+                  }
                 >
                   {item?.nm_produto ||
                     "Produto"}
@@ -977,9 +1442,13 @@ export default function VisualizarPerfilScreen() {
                   style={
                     styles.listingCategory
                   }
-                  numberOfLines={1}
+                  numberOfLines={
+                    1
+                  }
                 >
-                  {categoriaNome}
+                  {
+                    categoriaNome
+                  }
                 </Text>
 
                 <View
@@ -1002,6 +1471,234 @@ export default function VisualizarPerfilScreen() {
           );
         }}
       />
+
+      {/* ====================================================== */}
+      {/* MODAL DE BLOQUEIO */}
+      {/* ====================================================== */}
+
+      {!isOwnProfile && (
+        <Modal
+          visible={
+            modalBloqueioVisivel
+          }
+          transparent
+          animationType="fade"
+          onRequestClose={
+            fecharModalBloqueio
+          }
+        >
+          <View
+            style={
+              styles.modalOverlay
+            }
+          >
+            <View
+              style={
+                styles.blockModal
+              }
+            >
+              {/* ÍCONE */}
+
+              <View
+                style={
+                  styles.blockModalIcon
+                }
+              >
+                <MaterialCommunityIcons
+                  name="block-helper"
+                  size={32}
+                  color="#D9534F"
+                />
+              </View>
+
+              {/* TÍTULO */}
+
+              <Text
+                style={
+                  styles.blockModalTitle
+                }
+              >
+                Bloquear
+                usuário
+              </Text>
+
+              {/* DESCRIÇÃO */}
+
+              <Text
+                style={
+                  styles.blockModalDescription
+                }
+              >
+                Você deseja
+                bloquear este
+                usuário?
+              </Text>
+
+              {/* USUÁRIO */}
+
+              <View
+                style={
+                  styles.blockUserContainer
+                }
+              >
+                {fotoPerfilUrl ? (
+                  <Image
+                    source={{
+                      uri: fotoPerfilUrl,
+                    }}
+                    style={
+                      styles.blockUserAvatar
+                    }
+                  />
+                ) : (
+                  <View
+                    style={
+                      styles.blockUserAvatarFallback
+                    }
+                  >
+                    <Feather
+                      name="user"
+                      size={21}
+                      color="#005386"
+                    />
+                  </View>
+                )}
+
+                <View
+                  style={
+                    styles.blockUserInfo
+                  }
+                >
+                  <Text
+                    style={
+                      styles.blockUserName
+                    }
+                    numberOfLines={
+                      1
+                    }
+                  >
+                    {
+                      user.name
+                    }
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.blockUserHint
+                    }
+                  >
+                    Este usuário
+                    será
+                    bloqueado.
+                  </Text>
+                </View>
+              </View>
+
+              {/* AVISO */}
+
+              <View
+                style={
+                  styles.blockNotice
+                }
+              >
+                <Feather
+                  name="info"
+                  size={18}
+                  color="#005386"
+                />
+
+                <Text
+                  style={
+                    styles.blockNoticeText
+                  }
+                >
+                  Após bloquear
+                  este usuário,
+                  as interações
+                  entre vocês
+                  poderão ser
+                  limitadas.
+                </Text>
+              </View>
+
+              {/* BOTÕES */}
+
+              <View
+                style={
+                  styles.blockModalActions
+                }
+              >
+                <TouchableOpacity
+                  style={[
+                    styles.blockCancelButton,
+
+                    bloqueando &&
+                      styles.blockButtonDisabled,
+                  ]}
+                  onPress={
+                    fecharModalBloqueio
+                  }
+                  disabled={
+                    bloqueando
+                  }
+                  activeOpacity={
+                    0.7
+                  }
+                >
+                  <Text
+                    style={
+                      styles.blockCancelText
+                    }
+                  >
+                    Cancelar
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.blockConfirmButton,
+
+                    bloqueando &&
+                      styles.blockButtonDisabled,
+                  ]}
+                  onPress={
+                    confirmarBloqueio
+                  }
+                  disabled={
+                    bloqueando
+                  }
+                  activeOpacity={
+                    0.7
+                  }
+                >
+                  {bloqueando ? (
+                    <ActivityIndicator
+                      size="small"
+                      color="#FFFFFF"
+                    />
+                  ) : (
+                    <MaterialCommunityIcons
+                      name="block-helper"
+                      size={18}
+                      color="#FFFFFF"
+                    />
+                  )}
+
+                  <Text
+                    style={
+                      styles.blockConfirmText
+                    }
+                  >
+                    {bloqueando
+                      ? "Bloqueando..."
+                      : "Sim, bloquear"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
     </SafeAreaView>
   );
 }
@@ -1010,235 +1707,776 @@ export default function VisualizarPerfilScreen() {
    ESTILOS
 ================================================================ */
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#fff",
-  },
+const styles =
+  StyleSheet.create({
+    container: {
+      flex: 1,
 
-  header: {
-    height: 60,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    backgroundColor: "#FFFFFF",
-    borderBottomWidth: 1,
-    borderBottomColor: "#EEEEEE",
-  },
+      backgroundColor:
+        "#FFFFFF",
+    },
 
-  headerButton: {
-    width: 40,
-    height: 40,
-    justifyContent: "center",
-    alignItems: "center",
-  },
+    /* ============================================================
+       HEADER
+    ============================================================ */
 
-  listContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 30,
-  },
+    header: {
+      height: 60,
 
-  bannerContainer: {
-    width: "100%",
-    height: 150,
-    marginTop: 15,
-    borderRadius: 14,
-    overflow: "hidden",
-    backgroundColor: "#E4F8FF",
-  },
+      flexDirection:
+        "row",
 
-  bannerImage: {
-    width: "100%",
-    height: "100%",
-    resizeMode: "cover",
-  },
+      alignItems:
+        "center",
 
-  bannerPlaceholder: {
-    width: "100%",
-    height: "100%",
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "#E4F8FF",
-  },
+      justifyContent:
+        "space-between",
 
-  profileInfoContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 15,
-  },
+      paddingHorizontal:
+        16,
 
-  roundAvatar: {
-    width: 86,
-    height: 86,
-    borderRadius: 43,
-    backgroundColor: "#E4F8FF",
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 1.5,
-    borderColor: "#0099FF",
-    elevation: 3,
-    overflow: "hidden",
-  },
+      backgroundColor:
+        "#FFFFFF",
 
-  profileImage: {
-    width: "100%",
-    height: "100%",
-    resizeMode: "cover",
-  },
+      borderBottomWidth:
+        1,
 
-  userInfoTextContainer: {
-    marginLeft: 16,
-    flex: 1,
-  },
+      borderBottomColor:
+        "#EEEEEE",
+    },
 
-  userName: {
-    fontFamily: "Montserrat_700Bold",
-    fontSize: 19,
-    color: "#005386",
-  },
+    headerButton: {
+      width: 40,
 
-  addressRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 4,
-  },
+      height: 40,
 
-  addressIcon: {
-    marginRight: 4,
-  },
+      justifyContent:
+        "center",
 
-  userSubtext: {
-    fontFamily: "Montserrat_400Regular",
-    fontSize: 13,
-    color: "#777777",
-    flex: 1,
-  },
+      alignItems:
+        "center",
+    },
 
-  ratingContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 15,
-    paddingLeft: 4,
-  },
+    headerActions: {
+      flexDirection:
+        "row",
 
-  starsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
+      alignItems:
+        "center",
 
-  starIcon: {
-    marginRight: 4,
-  },
+      gap: 4,
+    },
 
-  ratingText: {
-    fontFamily: "Montserrat_600SemiBold",
-    fontSize: 14,
-    color: "#005386",
-    marginLeft: 8,
-  },
+    headerPlaceholder: {
+      width: 84,
 
-  tabsContainer: {
-    flexDirection: "row",
-    marginVertical: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: "#EEEEEE",
-    paddingBottom: 4,
-  },
+      height: 40,
+    },
 
-  tabItem: {
-    marginRight: 24,
-    paddingBottom: 8,
-    flexDirection: "row",
-    alignItems: "center",
-  },
+    headerButtonDisabled:
+      {
+        opacity: 0.5,
+      },
 
-  favoriteTabItem: {
-    marginRight: 8,
-  },
+    /* ============================================================
+       LISTA
+    ============================================================ */
 
-  activeTab: {
-    borderBottomWidth: 2,
-    borderBottomColor: "#0099FF",
-  },
+    listContent: {
+      paddingHorizontal:
+        16,
 
-  tabText: {
-    fontFamily: "Montserrat_500Medium",
-    fontSize: 14,
-    color: "#888",
-  },
+      paddingBottom:
+        30,
+    },
 
-  activeTabText: {
-    fontFamily: "Montserrat_700Bold",
-    color: "#005386",
-  },
+    /* ============================================================
+       BANNER
+    ============================================================ */
 
-  gridRow: {
-    justifyContent: "space-between",
-  },
+    bannerContainer: {
+      width: "100%",
 
-  listingCard: {
-    width: itemWidth,
-    marginBottom: 20,
-    backgroundColor: "#FFFFFF",
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#EEEEEE",
-    overflow: "hidden",
-    elevation: 2,
-  },
+      height: 150,
 
-  imagePlaceholder: {
-    width: "100%",
-    height: itemWidth,
-    backgroundColor: "#F5FBFF",
-    justifyContent: "center",
-    alignItems: "center",
-  },
+      marginTop: 15,
 
-  productImage: {
-    width: "100%",
-    height: "100%",
-    resizeMode: "cover",
-  },
+      borderRadius:
+        14,
 
-  textPlaceholderRow: {
-    marginTop: 8,
-    paddingHorizontal: 8,
-    paddingBottom: 8,
-  },
+      overflow:
+        "hidden",
 
-  listingTitle: {
-    fontFamily: "Montserrat_600SemiBold",
-    fontSize: 13,
-    color: "#333333",
-  },
+      backgroundColor:
+        "#E4F8FF",
+    },
 
-  listingCategory: {
-    fontFamily: "Montserrat_500Medium",
-    fontSize: 11,
-    color: "#0099FF",
-    marginTop: 3,
-  },
+    bannerImage: {
+      width: "100%",
 
-  cardFooterRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: 3,
-  },
+      height: "100%",
 
-  listingPrice: {
-    fontFamily: "Montserrat_400Regular",
-    fontSize: 11,
-    color: "#777777",
-  },
+      resizeMode:
+        "cover",
+    },
 
-  emptyText: {
-    textAlign: "center",
-    fontFamily: "Montserrat_400Regular",
-    color: "#888",
-    marginTop: 40,
-    fontSize: 14,
-  },
-});
+    bannerPlaceholder:
+      {
+        width: "100%",
+
+        height: "100%",
+
+        justifyContent:
+          "center",
+
+        alignItems:
+          "center",
+
+        backgroundColor:
+          "#E4F8FF",
+      },
+
+    /* ============================================================
+       PERFIL
+    ============================================================ */
+
+    profileInfoContainer:
+      {
+        flexDirection:
+          "row",
+
+        alignItems:
+          "center",
+
+        marginTop: 15,
+      },
+
+    roundAvatar: {
+      width: 86,
+
+      height: 86,
+
+      borderRadius:
+        43,
+
+      backgroundColor:
+        "#E4F8FF",
+
+      justifyContent:
+        "center",
+
+      alignItems:
+        "center",
+
+      borderWidth:
+        1.5,
+
+      borderColor:
+        "#0099FF",
+
+      elevation: 3,
+
+      overflow:
+        "hidden",
+    },
+
+    profileImage: {
+      width: "100%",
+
+      height: "100%",
+
+      resizeMode:
+        "cover",
+    },
+
+    userInfoTextContainer:
+      {
+        marginLeft: 16,
+
+        flex: 1,
+      },
+
+    userName: {
+      fontFamily:
+        "Montserrat_700Bold",
+
+      fontSize: 19,
+
+      color: "#005386",
+    },
+
+    addressRow: {
+      flexDirection:
+        "row",
+
+      alignItems:
+        "center",
+
+      marginTop: 4,
+    },
+
+    /*
+     * addressIcon foi removido
+     * porque não existe mais
+     * o ícone file-text.
+     */
+
+    userSubtext: {
+      fontFamily:
+        "Montserrat_400Regular",
+
+      fontSize: 13,
+
+      color: "#777777",
+
+      flex: 1,
+    },
+
+    /* ============================================================
+       AVALIAÇÃO
+    ============================================================ */
+
+    ratingContainer: {
+      flexDirection:
+        "row",
+
+      alignItems:
+        "center",
+
+      marginTop: 15,
+
+      paddingLeft: 4,
+    },
+
+    starsRow: {
+      flexDirection:
+        "row",
+
+      alignItems:
+        "center",
+    },
+
+    starIcon: {
+      marginRight: 4,
+    },
+
+    ratingText: {
+      fontFamily:
+        "Montserrat_600SemiBold",
+
+      fontSize: 14,
+
+      color: "#005386",
+
+      marginLeft: 8,
+    },
+
+    /* ============================================================
+       ABAS
+    ============================================================ */
+
+    tabsContainer: {
+      flexDirection:
+        "row",
+
+      marginVertical:
+        20,
+
+      borderBottomWidth:
+        1,
+
+      borderBottomColor:
+        "#EEEEEE",
+
+      paddingBottom: 4,
+    },
+
+    tabItem: {
+      marginRight: 24,
+
+      paddingBottom: 8,
+
+      flexDirection:
+        "row",
+
+      alignItems:
+        "center",
+    },
+
+    favoriteTabItem:
+      {
+        marginRight: 8,
+      },
+
+    activeTab: {
+      borderBottomWidth:
+        2,
+
+      borderBottomColor:
+        "#0099FF",
+    },
+
+    tabText: {
+      fontFamily:
+        "Montserrat_500Medium",
+
+      fontSize: 14,
+
+      color: "#888888",
+    },
+
+    activeTabText: {
+      fontFamily:
+        "Montserrat_700Bold",
+
+      color: "#005386",
+    },
+
+    /* ============================================================
+       GRID
+    ============================================================ */
+
+    gridRow: {
+      justifyContent:
+        "space-between",
+    },
+
+    listingCard: {
+      width:
+        itemWidth,
+
+      marginBottom: 20,
+
+      backgroundColor:
+        "#FFFFFF",
+
+      borderRadius:
+        14,
+
+      borderWidth: 1,
+
+      borderColor:
+        "#EEEEEE",
+
+      overflow:
+        "hidden",
+
+      elevation: 2,
+    },
+
+    imagePlaceholder: {
+      width: "100%",
+
+      height:
+        itemWidth,
+
+      backgroundColor:
+        "#F5FBFF",
+
+      justifyContent:
+        "center",
+
+      alignItems:
+        "center",
+    },
+
+    productImage: {
+      width: "100%",
+
+      height: "100%",
+
+      resizeMode:
+        "cover",
+    },
+
+    textPlaceholderRow:
+      {
+        marginTop: 8,
+
+        paddingHorizontal:
+          8,
+
+        paddingBottom:
+          8,
+      },
+
+    listingTitle: {
+      fontFamily:
+        "Montserrat_600SemiBold",
+
+      fontSize: 13,
+
+      color: "#333333",
+    },
+
+    listingCategory:
+      {
+        fontFamily:
+          "Montserrat_500Medium",
+
+        fontSize: 11,
+
+        color: "#0099FF",
+
+        marginTop: 3,
+      },
+
+    cardFooterRow: {
+      flexDirection:
+        "row",
+
+      justifyContent:
+        "space-between",
+
+      alignItems:
+        "center",
+
+      marginTop: 3,
+    },
+
+    listingPrice: {
+      fontFamily:
+        "Montserrat_400Regular",
+
+      fontSize: 11,
+
+      color: "#777777",
+    },
+
+    emptyText: {
+      textAlign:
+        "center",
+
+      fontFamily:
+        "Montserrat_400Regular",
+
+      color: "#888888",
+
+      marginTop: 40,
+
+      fontSize: 14,
+    },
+
+    /* ============================================================
+       MODAL BLOQUEIO
+    ============================================================ */
+
+    modalOverlay: {
+      flex: 1,
+
+      backgroundColor:
+        "rgba(0, 0, 0, 0.50)",
+
+      justifyContent:
+        "center",
+
+      alignItems:
+        "center",
+
+      paddingHorizontal:
+        24,
+    },
+
+    blockModal: {
+      width: "100%",
+
+      maxWidth: 390,
+
+      backgroundColor:
+        "#FFFFFF",
+
+      borderRadius:
+        20,
+
+      padding: 24,
+
+      elevation: 10,
+
+      shadowColor:
+        "#000000",
+
+      shadowOpacity:
+        0.2,
+
+      shadowRadius:
+        12,
+
+      shadowOffset: {
+        width: 0,
+
+        height: 5,
+      },
+    },
+
+    blockModalIcon: {
+      width: 66,
+
+      height: 66,
+
+      borderRadius:
+        33,
+
+      backgroundColor:
+        "#FFF1F0",
+
+      justifyContent:
+        "center",
+
+      alignItems:
+        "center",
+
+      alignSelf:
+        "center",
+
+      marginBottom:
+        16,
+    },
+
+    blockModalTitle: {
+      fontFamily:
+        "Montserrat_700Bold",
+
+      fontSize: 19,
+
+      color: "#333333",
+
+      textAlign:
+        "center",
+    },
+
+    blockModalDescription:
+      {
+        fontFamily:
+          "Montserrat_400Regular",
+
+        fontSize: 14,
+
+        color: "#666666",
+
+        textAlign:
+          "center",
+
+        marginTop: 8,
+      },
+
+    /* ============================================================
+       USUÁRIO NO MODAL
+    ============================================================ */
+
+    blockUserContainer:
+      {
+        flexDirection:
+          "row",
+
+        alignItems:
+          "center",
+
+        backgroundColor:
+          "#F8FAFB",
+
+        borderRadius:
+          12,
+
+        padding: 12,
+
+        marginTop: 18,
+
+        borderWidth: 1,
+
+        borderColor:
+          "#EEEEEE",
+      },
+
+    blockUserAvatar: {
+      width: 44,
+
+      height: 44,
+
+      borderRadius:
+        22,
+
+      backgroundColor:
+        "#E4F8FF",
+    },
+
+    blockUserAvatarFallback:
+      {
+        width: 44,
+
+        height: 44,
+
+        borderRadius:
+          22,
+
+        backgroundColor:
+          "#E4F8FF",
+
+        justifyContent:
+          "center",
+
+        alignItems:
+          "center",
+      },
+
+    blockUserInfo: {
+      flex: 1,
+
+      marginLeft: 12,
+    },
+
+    blockUserName: {
+      fontFamily:
+        "Montserrat_600SemiBold",
+
+      fontSize: 14,
+
+      color: "#005386",
+    },
+
+    blockUserHint: {
+      fontFamily:
+        "Montserrat_400Regular",
+
+      fontSize: 11,
+
+      color: "#777777",
+
+      marginTop: 2,
+    },
+
+    /* ============================================================
+       AVISO DO MODAL
+    ============================================================ */
+
+    blockNotice: {
+      flexDirection:
+        "row",
+
+      alignItems:
+        "flex-start",
+
+      backgroundColor:
+        "#F0F8FF",
+
+      borderRadius:
+        10,
+
+      padding: 12,
+
+      marginTop: 14,
+
+      gap: 8,
+    },
+
+    blockNoticeText: {
+      flex: 1,
+
+      fontFamily:
+        "Montserrat_400Regular",
+
+      fontSize: 11,
+
+      lineHeight: 17,
+
+      color: "#005386",
+    },
+
+    /* ============================================================
+       BOTÕES MODAL
+    ============================================================ */
+
+    blockModalActions:
+      {
+        flexDirection:
+          "row",
+
+        gap: 10,
+
+        marginTop: 22,
+      },
+
+    blockCancelButton:
+      {
+        flex: 1,
+
+        minHeight: 48,
+
+        borderRadius:
+          10,
+
+        borderWidth: 1,
+
+        borderColor:
+          "#D8E3EB",
+
+        backgroundColor:
+          "#FFFFFF",
+
+        justifyContent:
+          "center",
+
+        alignItems:
+          "center",
+
+        paddingHorizontal:
+          10,
+      },
+
+    blockCancelText: {
+      fontFamily:
+        "Montserrat_600SemiBold",
+
+      fontSize: 13,
+
+      color: "#005386",
+
+      textAlign:
+        "center",
+    },
+
+    blockConfirmButton:
+      {
+        flex: 1.2,
+
+        minHeight: 48,
+
+        borderRadius:
+          10,
+
+        backgroundColor:
+          "#D9534F",
+
+        flexDirection:
+          "row",
+
+        justifyContent:
+          "center",
+
+        alignItems:
+          "center",
+
+        paddingHorizontal:
+          10,
+
+        gap: 6,
+      },
+
+    blockConfirmText: {
+      fontFamily:
+        "Montserrat_600SemiBold",
+
+      fontSize: 13,
+
+      color: "#FFFFFF",
+
+      textAlign:
+        "center",
+
+      flexShrink: 1,
+    },
+
+    blockButtonDisabled:
+      {
+        opacity: 0.6,
+      },
+  });

@@ -327,6 +327,7 @@ const ChatInput = memo(function ChatInput({
   onChangeText,
   onSend,
   onPickImage,
+  onLocation,
   sending,
   hasImage,
   bottomSpace,
@@ -335,6 +336,7 @@ const ChatInput = memo(function ChatInput({
   onChangeText: (t: string) => void;
   onSend: () => void;
   onPickImage: () => void;
+  onLocation: () => void;
   sending: boolean;
   hasImage: boolean;
   bottomSpace: number;
@@ -343,14 +345,20 @@ const ChatInput = memo(function ChatInput({
 
   return (
     <View style={[styles.inputContainer, { bottom: bottomSpace }]}>
+      {/* IMAGEM */}
       <TouchableOpacity
-        style={[styles.imageButton, sending && styles.imageButtonDisabled]}
+        style={[
+          styles.imageButton,
+          sending && styles.imageButtonDisabled,
+        ]}
         onPress={onPickImage}
         disabled={sending}
+        activeOpacity={0.7}
       >
         <Feather name="image" size={21} color="#005386" />
       </TouchableOpacity>
 
+      {/* CAMPO DE MENSAGEM */}
       <TextInput
         style={styles.textInput}
         placeholder="Digite sua mensagem..."
@@ -361,10 +369,32 @@ const ChatInput = memo(function ChatInput({
         multiline
       />
 
+      {/* LOCALIZAÇÃO */}
       <TouchableOpacity
-        style={[styles.sendButton, disabledSend && styles.sendButtonDisabled]}
+        style={[
+          styles.locationButton,
+          sending && styles.imageButtonDisabled,
+        ]}
+        onPress={onLocation}
+        disabled={sending}
+        activeOpacity={0.7}
+      >
+        <Feather
+          name="map-pin"
+          size={20}
+          color="#005386"
+        />
+      </TouchableOpacity>
+
+      {/* ENVIAR */}
+      <TouchableOpacity
+        style={[
+          styles.sendButton,
+          disabledSend && styles.sendButtonDisabled,
+        ]}
         onPress={onSend}
         disabled={disabledSend}
+        activeOpacity={0.7}
       >
         {sending ? (
           <ActivityIndicator size="small" color="#FFFFFF" />
@@ -942,6 +972,17 @@ export default function ChatScreen() {
   }, [sendingMessage, imagemSelecionada]);
 
   // ==========================================================
+// LOCALIZAÇÃO
+// ==========================================================
+
+const selecionarLocalizacao = useCallback(() => {
+  Alert.alert(
+    "Enviar localização",
+    "A funcionalidade de localização será integrada posteriormente."
+  );
+}, []);
+
+  // ==========================================================
   // ENVIAR MENSAGEM (OPTIMISTIC UPDATE)
   // ==========================================================
   const handleSendMessage = useCallback(async () => {
@@ -1378,15 +1419,17 @@ export default function ChatScreen() {
         ) : null}
 
         {/* INPUT MEMOIZADO */}
-        <ChatInput
-          value={inputText}
-          onChangeText={setInputText}
-          onSend={handleSendMessage}
-          onPickImage={selecionarImagem}
-          sending={sendingMessage}
-          hasImage={!!imagemSelecionada}
-          bottomSpace={inputBottomSpace}
-        />
+{/* INPUT MEMOIZADO */}
+<ChatInput
+  value={inputText}
+  onChangeText={setInputText}
+  onSend={handleSendMessage}
+  onPickImage={selecionarImagem}
+  onLocation={selecionarLocalizacao}
+  sending={sendingMessage}
+  hasImage={!!imagemSelecionada}
+  bottomSpace={inputBottomSpace}
+/>
       </KeyboardAvoidingView>
 
       {/* MODAL DE FINALIZAÇÃO */}
@@ -1532,6 +1575,7 @@ const styles = StyleSheet.create({
   headerStatus: {
     fontSize: 12,
     color: "#777777",
+    fontFamily: "Montserrat_400Regular",
   },
 
   productBanner: {
@@ -1575,6 +1619,7 @@ const styles = StyleSheet.create({
   bannerLabel: {
     fontSize: 11,
     color: "#777777",
+    fontFamily: "Montserrat_400Regular",
   },
 
   bannerTitle: {
@@ -1587,6 +1632,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: "#999999",
     marginTop: 2,
+    fontFamily: "Montserrat_400Regular",
   },
 
   finishBtn: {
@@ -1654,6 +1700,7 @@ const styles = StyleSheet.create({
   messageText: {
     fontSize: 14,
     flexShrink: 1,
+    fontFamily: "Montserrat_400Regular",
   },
 
   myMessageText: {
@@ -1674,6 +1721,7 @@ const styles = StyleSheet.create({
   messageTime: {
     fontSize: 10,
     marginLeft: 8,
+    fontFamily: "Montserrat_400Regular",
   },
 
   myMessageTime: {
@@ -1706,6 +1754,7 @@ const styles = StyleSheet.create({
     color: "#777777",
     fontSize: 14,
     marginTop: 30,
+    fontFamily: "Montserrat_400Regular",
   },
 
   imagePreviewContainer: {
@@ -1722,7 +1771,10 @@ const styles = StyleSheet.create({
     shadowColor: "#000000",
     shadowOpacity: 0.15,
     shadowRadius: 5,
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
     zIndex: 20,
   },
 
@@ -1737,6 +1789,7 @@ const styles = StyleSheet.create({
     color: "#777777",
     textAlign: "center",
     marginTop: 2,
+    fontFamily: "Montserrat_400Regular",
   },
 
   removeImageButton: {
@@ -1777,6 +1830,16 @@ const styles = StyleSheet.create({
     backgroundColor: "#F4F8FB",
   },
 
+  locationButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: "center",
+    alignItems: "center",
+    marginLeft: 6,
+    backgroundColor: "#F4F8FB",
+  },
+
   imageButtonDisabled: {
     opacity: 0.5,
   },
@@ -1792,6 +1855,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E5E5E5",
     fontSize: 14,
+    fontFamily: "Montserrat_400Regular",
+    color: "#333333",
   },
 
   sendButton: {
@@ -1832,7 +1897,10 @@ const styles = StyleSheet.create({
     shadowColor: "#000000",
     shadowOpacity: 0.2,
     shadowRadius: 12,
-    shadowOffset: { width: 0, height: 5 },
+    shadowOffset: {
+      width: 0,
+      height: 5,
+    },
   },
 
   modalContent: {
@@ -1863,6 +1931,7 @@ const styles = StyleSheet.create({
     color: "#555555",
     textAlign: "center",
     lineHeight: 23,
+    fontFamily: "Montserrat_400Regular",
   },
 
   modalNotice: {
@@ -1880,6 +1949,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#005386",
     lineHeight: 19,
+    fontFamily: "Montserrat_400Regular",
   },
 
   modalErrorContainer: {
@@ -1893,6 +1963,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#B42318",
     lineHeight: 19,
+    fontFamily: "Montserrat_400Regular",
   },
 
   modalActions: {

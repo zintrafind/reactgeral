@@ -12,674 +12,748 @@ import React, {
 } from "react";
 import {
   ActivityIndicator,
-  Dimensions,
   FlatList,
   Image,
   Modal,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-
 import api from "../../services/api";
 
-// ============================================================
-// CONSTANTES
-// ============================================================
-
-const { width } = Dimensions.get("window");
-const ITEM_WIDTH = (width - 44) / 2;
-const CACHE_PERFIL = 30_000;
-const TEMPO_LIMITE_REQUISICAO = 15000;
 const LIMITE_INICIAL = 8;
-const PERFIL_CACHE_KEY = "@pecapeca:perfil_cache_v1";
-const PERFIL_CACHE_MAX_AGE = 1000 * 60 * 30; // 30min
+const TIMEOUT = 15000;
+const CACHE_PREFIX = "@pecapeca:perfil_cache_v2:";
+const CACHE_MAX_AGE = 30 * 60 * 1000;
 
-type TabType = "anuncios" | "trocados" | "favoritos";
+type TabType = "anuncios" | "trocados";
 
-interface UserProfileData {
+type ImagemAPI = {
+  id_imagem?: number;
+  ds_imagem?: string;
+  nr_ordem?: number;
+};
+
+type Produto = {
+  id_produto: number;
+  nm_produto: string;
+  ds_produto?: string;
+  st_condicao: string;
+  st_status: string;
+  images?: ImagemAPI[];
+  imagens?: ImagemAPI[];
+  ds_imagem?: string;
+  categoria?: {
+    nm_categoria?: string;
+  };
+  nm_categoria?: string;
+};
+
+type Usuario = {
   id_usuario?: number | string;
-  name: string;
-  description: string;
-  rating: string;
-  fotoPerfil: string | null;
-  banner: string | null;
-}
+  id?: number | string;
+  nm_usuario?: string;
+  ds_usuario?: string;
+  ds_foto_perfil?: string | null;
+  ds_banner?: string | null;
+};
 
-// ============================================================
-// HELPERS
-// ============================================================
+type PerfilCache = {
+  ts: number;
+  usuario: Usuario;
+  anuncios: Produto[];
+  trocados: Produto[];
+};
 
-function getImageUrl(imagePath?: string | null): string | null {
-  if (!imagePath) return null;
-  const path = String(imagePath).trim();
+type Aviso = {
+  titulo: string;
+  mensagem: string;
+};
+
+const OPCOES_STATUS: {
+  codigo: string;
+  nome: string;
+  icone: React.ComponentProps<typeof Feather>["name"];
+  cor: string;
+}[] = [
+  {
+    codigo: "A",
+    nome: "Disponível",
+    icone: "check-circle",
+    cor: "#28A745",
+  },
+  {
+    codigo: "N",
+    nome: "Em negociação",
+    icone: "clock",
+    cor: "#FF9900",
+  },
+  {
+    codigo: "T",
+    nome: "Trocado",
+    icone: "check",
+    cor: "#6C757D",
+  },
+];
+
+function getImageUrl(caminho?: string | null): string | null {
+  const path = String(caminho || "").trim();
+
   if (!path) return null;
-  if (/^https?:\/\//i.test(path)) return path;
+
+  if (/^(https?:|blob:|data:|file:|content:)/i.test(path)) {
+    return path;
+  }
 
   const baseUrl = String(
-    api.defaults?.baseURL || "http://127.0.0.1:8000/api"
+    api.defaults.baseURL || "http://127.0.0.1:8000/api"
   )
-    .replace(/\/api\/?$/, "")
-    .replace(/\/+$/, "");
+    .replace(/\/+$/, "")
+    .replace(/\/api$/, "");
 
-  const normalized = path
+  const normalizado = path
     .replace(/\\/g, "/")
     .replace(/^\/+/, "")
     .replace(/^storage\/+/, "");
 
-  return `${baseUrl}/storage/${normalized}`;
+  return `${baseUrl}/storage/${normalizado}`;
 }
 
-function getConditionLabel(condition: any): string {
-  const v = String(condition || "").trim().toUpperCase();
-  switch (v) {
+function getConditionLabel(codigo: string) {
+  switch (String(codigo || "").toUpperCase()) {
     case "N":
-    case "NOVO":
       return "Novo";
     case "S":
-    case "SEMI NOVO":
-    case "SEMINOVO":
-      return "Semi novo";
+      return "Seminovo";
     case "U":
-    case "USADO":
       return "Usado";
     case "Q":
-    case "QUEBRADO":
       return "Quebrado";
     default:
       return "Não informado";
   }
 }
 
-// ============================================================
-// CACHE
-// ============================================================
+function extrairProdutos(dados: any): Produto[] {
+  if (Array.isArray(dados)) return dados;
+  if (Array.isArray(dados?.products)) return dados.products;
+  if (Array.isArray(dados?.produtos)) return dados.produtos;
+  if (Array.isArray(dados?.data)) return dados.data;
 
-async function savePerfilCache(data: {
-  user: UserProfileData;
-  userProducts: any[];
-  tradedProducts: any[];
-}) {
-  try {
-    await AsyncStorage.setItem(
-      PERFIL_CACHE_KEY,
-      JSON.stringify({
-        ts: Date.now(),
-        ...data,
-        userProducts: data.userProducts.slice(0, 50),
-        tradedProducts: data.tradedProducts.slice(0, 50),
-      })
-    );
-  } catch {}
+  return [];
 }
 
-async function loadPerfilCache() {
-  try {
-    const raw = await AsyncStorage.getItem(PERFIL_CACHE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed?.ts) return null;
-    if (Date.now() - parsed.ts > PERFIL_CACHE_MAX_AGE) return null;
-    return parsed as {
-      user: UserProfileData;
-      userProducts: any[];
-      tradedProducts: any[];
-    };
-  } catch {
-    return null;
+function extrairImagens(produto: Produto): string[] {
+  const lista =
+    Array.isArray(produto.images) && produto.images.length > 0
+      ? produto.images
+      : Array.isArray(produto.imagens)
+        ? produto.imagens
+        : [];
+
+  const urls = [...lista]
+    .sort(
+      (a, b) =>
+        Number(a.nr_ordem || 0) - Number(b.nr_ordem || 0)
+    )
+    .map((imagem) => getImageUrl(imagem.ds_imagem))
+    .filter((url): url is string => Boolean(url))
+    .slice(0, 5);
+
+  if (urls.length > 0) return urls;
+
+  const antiga = getImageUrl(produto.ds_imagem);
+
+  return antiga ? [antiga] : [];
+}
+
+function mensagemErro(error: any, fallback: string) {
+  const erros = error?.response?.data?.errors;
+  const primeiro = erros ? Object.values(erros)[0] : undefined;
+
+  if (Array.isArray(primeiro) && primeiro[0]) {
+    return String(primeiro[0]);
   }
+
+  return error?.response?.data?.message || fallback;
 }
 
-// ============================================================
-// SKELETON
-// ============================================================
+const FotoProduto = memo(function FotoProduto({
+  uri,
+}: {
+  uri: string;
+}) {
+  const [falhou, setFalhou] = useState(false);
 
-const SkeletonCard = memo(function SkeletonCard() {
-  return (
-    <View style={styles.listingCard}>
-      <View style={[styles.imagePlaceholder, styles.skeletonBlock]} />
-      <View style={styles.textPlaceholderRow}>
-        <View
-          style={[
-            styles.skeletonLine,
-            { width: "75%", height: 12, marginBottom: 6 },
-          ]}
-        />
-        <View style={[styles.skeletonLine, { width: "50%", height: 10 }]} />
+  useEffect(() => {
+    setFalhou(false);
+  }, [uri]);
+
+  if (falhou) {
+    return (
+      <View style={styles.fotoVazia}>
+        <Feather name="image" size={30} color="#0099FF" />
       </View>
-    </View>
+    );
+  }
+
+  return (
+    <Image
+      source={{ uri }}
+      style={styles.productImage}
+      resizeMode="cover"
+      onError={() => setFalhou(true)}
+    />
   );
 });
 
-// ============================================================
-// CARD DE PRODUTO (memoizado)
-// ============================================================
-
 const ProductCard = memo(function ProductCard({
   item,
+  largura,
   onOpenOptions,
 }: {
-  item: any;
-  onOpenOptions: (item: any) => void;
+  item: Produto;
+  largura: number;
+  onOpenOptions: (item: Produto) => void;
 }) {
-  const imagemUrl = useMemo(
-    () =>
-      item.images && item.images.length > 0
-        ? getImageUrl(item.images[0]?.ds_imagem)
-        : null,
-    [item.images]
-  );
+  const fotos = useMemo(() => extrairImagens(item), [item]);
+  const assinatura = JSON.stringify(fotos);
 
-  const [failed, setFailed] = useState(false);
-  const showImage = imagemUrl && !failed;
+  const [indice, setIndice] = useState(0);
+  const [larguraFoto, setLarguraFoto] = useState(0);
 
-  const handlePress = useCallback(
-    () => onOpenOptions(item),
-    [onOpenOptions, item]
-  );
+  const scrollRef = useRef<ScrollView>(null);
+
+  useEffect(() => {
+    setIndice(0);
+
+    scrollRef.current?.scrollTo({
+      x: 0,
+      animated: false,
+    });
+  }, [item.id_produto, assinatura, larguraFoto]);
+
+  function irParaFoto(index: number) {
+    if (
+      larguraFoto <= 0 ||
+      index < 0 ||
+      index >= fotos.length
+    ) {
+      return;
+    }
+
+    setIndice(index);
+
+    scrollRef.current?.scrollTo({
+      x: index * larguraFoto,
+      animated: true,
+    });
+  }
+
+  function atualizarIndice(offset: number) {
+    if (larguraFoto <= 0) return;
+
+    const novo = Math.round(offset / larguraFoto);
+
+    setIndice(
+      Math.min(Math.max(novo, 0), Math.max(fotos.length - 1, 0))
+    );
+  }
 
   return (
-    <TouchableOpacity
-      style={styles.listingCard}
-      activeOpacity={0.8}
-      onPress={handlePress}
-    >
-      <View style={styles.imagePlaceholder}>
-        {showImage ? (
-          <Image
-            source={{ uri: imagemUrl! }}
-            style={styles.productImage}
-            onError={() => setFailed(true)}
-            fadeDuration={150}
-          />
+    <View style={[styles.listingCard, { width: largura }]}>
+      <View
+        style={[styles.galeria, { height: largura }]}
+        onLayout={(event) =>
+          setLarguraFoto(event.nativeEvent.layout.width)
+        }
+      >
+        {fotos.length > 0 && larguraFoto > 0 ? (
+          <ScrollView
+            ref={scrollRef}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            onMomentumScrollEnd={(event) =>
+              atualizarIndice(event.nativeEvent.contentOffset.x)
+            }
+            onScrollEndDrag={(event) =>
+              atualizarIndice(event.nativeEvent.contentOffset.x)
+            }
+          >
+            {fotos.map((uri, index) => (
+              <TouchableOpacity
+                key={`${uri}-${index}`}
+                style={{
+                  width: larguraFoto,
+                  height: largura,
+                }}
+                activeOpacity={0.9}
+                onPress={() => onOpenOptions(item)}
+                accessibilityLabel={`Foto ${index + 1} de ${item.nm_produto}`}
+              >
+                <FotoProduto uri={uri} />
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
         ) : (
-          <Feather name="package" size={32} color="#0099FF" />
+          <TouchableOpacity
+            style={styles.fotoVazia}
+            onPress={() => onOpenOptions(item)}
+          >
+            <Feather name="package" size={32} color="#0099FF" />
+          </TouchableOpacity>
+        )}
+
+        {fotos.length > 1 && (
+          <>
+            {indice > 0 && (
+              <TouchableOpacity
+                style={[styles.setaFoto, styles.setaEsquerda]}
+                onPress={() => irParaFoto(indice - 1)}
+                accessibilityLabel="Foto anterior"
+              >
+                <Feather
+                  name="chevron-left"
+                  size={21}
+                  color="#FFFFFF"
+                />
+              </TouchableOpacity>
+            )}
+
+            {indice < fotos.length - 1 && (
+              <TouchableOpacity
+                style={[styles.setaFoto, styles.setaDireita]}
+                onPress={() => irParaFoto(indice + 1)}
+                accessibilityLabel="Próxima foto"
+              >
+                <Feather
+                  name="chevron-right"
+                  size={21}
+                  color="#FFFFFF"
+                />
+              </TouchableOpacity>
+            )}
+
+            <View style={styles.contadorFoto}>
+              <Text style={styles.contadorTexto}>
+                {indice + 1}/{fotos.length}
+              </Text>
+            </View>
+
+            <View style={styles.paginacao}>
+              {fotos.map((_, index) => (
+                <TouchableOpacity
+                  key={index}
+                  style={styles.areaPonto}
+                  onPress={() => irParaFoto(index)}
+                  accessibilityLabel={`Ver foto ${index + 1}`}
+                >
+                  <View
+                    style={[
+                      styles.ponto,
+                      indice === index && styles.pontoAtivo,
+                    ]}
+                  />
+                </TouchableOpacity>
+              ))}
+            </View>
+          </>
+        )}
+
+        {item.st_status === "T" && (
+          <View style={styles.trocadoBadge}>
+            <Text style={styles.trocadoTexto}>Trocado</Text>
+          </View>
         )}
       </View>
 
-      <View style={styles.textPlaceholderRow}>
+      <TouchableOpacity
+        style={styles.cardInfo}
+        onPress={() => onOpenOptions(item)}
+        activeOpacity={0.8}
+      >
         <Text style={styles.listingTitle} numberOfLines={1}>
           {item.nm_produto}
         </Text>
 
         <Text style={styles.listingCategory} numberOfLines={1}>
-          {item.categoria?.nm_categoria || "Sem categoria"}
+          {item.categoria?.nm_categoria ||
+            item.nm_categoria ||
+            "Sem categoria"}
         </Text>
 
         <View style={styles.cardFooterRow}>
-          <Text style={styles.listingPrice}>
+          <Text style={styles.listingCondition}>
             {getConditionLabel(item.st_condicao)}
           </Text>
 
-          <TouchableOpacity
-            style={styles.moreOptionsButton}
-            onPress={handlePress}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Feather name="more-vertical" size={18} color="#005386" />
-          </TouchableOpacity>
+          <Feather
+            name="more-vertical"
+            size={18}
+            color="#005386"
+          />
         </View>
-      </View>
-    </TouchableOpacity>
+      </TouchableOpacity>
+    </View>
   );
 });
 
-// ============================================================
-// HOOK — PERFIL
-// ============================================================
+export default function ProfileScreen() {
+  const router = useRouter();
+  const { width } = useWindowDimensions();
 
-function usePerfil() {
-  const [user, setUser] = useState<UserProfileData>({
-    id_usuario: undefined,
-    name: "",
-    description: "",
-    rating: "5.0",
-    fotoPerfil: null,
-    banner: null,
-  });
-  const [userProducts, setUserProducts] = useState<any[]>([]);
-  const [tradedProducts, setTradedProducts] = useState<any[]>([]);
+  const larguraCard = Math.max((width - 44) / 2, 100);
+
+  const [usuario, setUsuario] = useState<Usuario | null>(null);
+  const [anuncios, setAnuncios] = useState<Produto[]>([]);
+  const [trocados, setTrocados] = useState<Produto[]>([]);
+  const [activeTab, setActiveTab] = useState<TabType>("anuncios");
+  const [limite, setLimite] = useState(LIMITE_INICIAL);
+
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [processando, setProcessando] = useState(false);
 
-  const tokenRef = useRef<string | null>(null);
-  const usuarioStorageRef = useRef<any>(null);
-  const carregandoRef = useRef(false);
-  const ultimaAtualizacaoRef = useRef(0);
-  const loadedRef = useRef(false);
+  const [selectedAd, setSelectedAd] = useState<Produto | null>(null);
+  const [optionsModalVisible, setOptionsModalVisible] = useState(false);
+  const [statusModalVisible, setStatusModalVisible] = useState(false);
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [logoutModalVisible, setLogoutModalVisible] = useState(false);
+  const [aviso, setAviso] = useState<Aviso | null>(null);
 
-  // ─── Carrega cache na montagem ────────────────────────
-  useEffect(() => {
-    let ativo = true;
-    (async () => {
-      const cached = await loadPerfilCache();
-      if (!ativo || !cached) return;
+  const requestIdRef = useRef(0);
+  const mutationRef = useRef(false);
 
-      setUser(cached.user);
-      setUserProducts(cached.userProducts || []);
-      setTradedProducts(cached.tradedProducts || []);
-      setLoading(false);
-      loadedRef.current = true;
-    })();
-
-    return () => {
-      ativo = false;
-    };
-  }, []);
-
-  // ─── Token helper (CORRIGIDO — sem recursão) ──────────
-  const obterToken = useCallback(async (): Promise<string | null> => {
-    if (tokenRef.current) return tokenRef.current;
-    const token = await AsyncStorage.getItem("token");
-    tokenRef.current = token;
-    return token;
-  }, []);
-
-  // ─── Carrega dados (cache-first + SWR) ────────────────
   const carregarPerfil = useCallback(
-    async (mostrarLoading = false, forcar = false, signal?: AbortSignal) => {
-      if (carregandoRef.current) return;
+    async (signal?: AbortSignal) => {
+      const requestId = ++requestIdRef.current;
 
-      if (
-        !forcar &&
-        loadedRef.current &&
-        Date.now() - ultimaAtualizacaoRef.current < CACHE_PERFIL
-      ) {
-        return;
-      }
+      const atual = () =>
+        !signal?.aborted &&
+        requestId === requestIdRef.current;
 
-      carregandoRef.current = true;
-      if (mostrarLoading && !loadedRef.current) setLoading(true);
+      setRefreshing(true);
 
       try {
-        // Token e usuário em paralelo
-        let token = tokenRef.current;
-        let usuarioStorage = usuarioStorageRef.current;
+        const [token, usuarioTexto] = await Promise.all([
+          AsyncStorage.getItem("token"),
+          AsyncStorage.getItem("usuario"),
+        ]);
 
-        if (!token || !usuarioStorage) {
-          const [tokenStorage, usuarioTexto] = await Promise.all([
-            token ? Promise.resolve(token) : AsyncStorage.getItem("token"),
-            usuarioStorage
-              ? Promise.resolve(JSON.stringify(usuarioStorage))
-              : AsyncStorage.getItem("usuario"),
-          ]);
+        if (!atual()) return;
 
-          token = tokenStorage;
-          tokenRef.current = tokenStorage;
-
-          if (!usuarioStorage && usuarioTexto) {
-            try {
-              usuarioStorage = JSON.parse(usuarioTexto);
-              usuarioStorageRef.current = usuarioStorage;
-            } catch {}
-          }
-        }
-
-        if (signal?.aborted) return;
-
-        // Mostra dados locais IMEDIATAMENTE
-        if (usuarioStorage) {
-          setUser({
-            id_usuario:
-              usuarioStorage.id_usuario || usuarioStorage.id || undefined,
-            name: usuarioStorage.nm_usuario || "",
-            description:
-              usuarioStorage.ds_usuario || "Descrição não informada",
-            rating: "5.0",
-            fotoPerfil: usuarioStorage.ds_foto_perfil || null,
-            banner: usuarioStorage.ds_banner || null,
-          });
-        }
-
-        if (!token) {
-          setLoading(false);
+        if (!token || !usuarioTexto) {
+          router.replace("/(auth)/login" as any);
           return;
         }
 
+        const usuarioLocal: Usuario = JSON.parse(usuarioTexto);
         const idUsuario =
-          usuarioStorage?.id_usuario || usuarioStorage?.id;
+          usuarioLocal.id_usuario ?? usuarioLocal.id;
 
-        // Requisições em paralelo
-        const reqs: Promise<any>[] = [
-          api.get("/my-products", {
-            headers: {
-              Accept: "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            signal,
-            timeout: TEMPO_LIMITE_REQUISICAO,
-          }),
-          api.get("/my-products?status=T", {
-            headers: {
-              Accept: "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            signal,
-            timeout: TEMPO_LIMITE_REQUISICAO,
-          }),
-        ];
-
-        if (idUsuario) {
-          reqs.push(
-            api.get(`/users/${idUsuario}`, {
-              headers: {
-                Accept: "application/json",
-                Authorization: `Bearer ${token}`,
-              },
-              signal,
-              timeout: TEMPO_LIMITE_REQUISICAO,
-            })
-          );
+        if (!idUsuario) {
+          throw new Error("Não foi possível identificar o usuário.");
         }
 
-        const resultados = await Promise.allSettled(reqs);
+        const cacheKey = `${CACHE_PREFIX}${idUsuario}`;
 
-        if (signal?.aborted) return;
+        let anunciosAtuais: Produto[] = [];
+        let trocadosAtuais: Produto[] = [];
 
-        // Anúncios
-        if (resultados[0]?.status === "fulfilled") {
-          const d = resultados[0].value.data;
-          setUserProducts(
-            Array.isArray(d) ? d : Array.isArray(d?.data) ? d.data : []
-          );
+        setUsuario(usuarioLocal);
+
+        try {
+          const raw = await AsyncStorage.getItem(cacheKey);
+
+          if (!atual()) return;
+
+          if (raw) {
+            const cache: PerfilCache = JSON.parse(raw);
+
+            if (
+              cache.ts &&
+              Date.now() - cache.ts < CACHE_MAX_AGE
+            ) {
+              anunciosAtuais = Array.isArray(cache.anuncios)
+                ? cache.anuncios
+                : [];
+
+              trocadosAtuais = Array.isArray(cache.trocados)
+                ? cache.trocados
+                : [];
+
+              setUsuario(cache.usuario || usuarioLocal);
+              setAnuncios(anunciosAtuais);
+              setTrocados(trocadosAtuais);
+              setLoading(false);
+            }
+          }
+        } catch {
+          // Um cache inválido não impede o carregamento da API.
         }
 
-        // Trocados
-        if (resultados[1]?.status === "fulfilled") {
-          const d = resultados[1].value.data;
-          setTradedProducts(
-            Array.isArray(d) ? d : Array.isArray(d?.data) ? d.data : []
+        const config = {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/json",
+          },
+          timeout: TIMEOUT,
+          signal,
+        };
+
+        const [resAnuncios, resTrocados, resUsuario] =
+          await Promise.allSettled([
+            api.get("/my-products", config),
+            api.get("/my-products?status=T", config),
+            api.get(`/users/${idUsuario}`, config),
+          ]);
+
+        if (!atual()) return;
+
+        let usuarioAtual = usuarioLocal;
+
+        if (resAnuncios.status === "fulfilled") {
+          anunciosAtuais = extrairProdutos(
+            resAnuncios.value.data
+          ).filter((produto) =>
+            ["A", "N"].includes(produto.st_status)
           );
+
+          setAnuncios(anunciosAtuais);
         }
 
-        // Usuário atualizado
-        if (resultados[2]?.status === "fulfilled" && usuarioStorage) {
-          const usuarioAPI =
-            resultados[2].value.data?.user || resultados[2].value.data;
+        if (resTrocados.status === "fulfilled") {
+          trocadosAtuais = extrairProdutos(
+            resTrocados.value.data
+          ).filter((produto) => produto.st_status === "T");
 
-          if (usuarioAPI) {
-            const atualizado = { ...usuarioStorage, ...usuarioAPI };
-            usuarioStorageRef.current = atualizado;
+          setTrocados(trocadosAtuais);
+        }
 
-            setUser({
-              id_usuario:
-                atualizado.id_usuario ||
-                atualizado.id ||
-                idUsuario,
-              name: atualizado.nm_usuario || "",
-              description:
-                atualizado.ds_usuario || "Descrição não informada",
-              rating: "5.0",
-              fotoPerfil: atualizado.ds_foto_perfil || null,
-              banner: atualizado.ds_banner || null,
-            });
+        if (resUsuario.status === "fulfilled") {
+          const dados = resUsuario.value.data;
+          const usuarioAPI = dados?.user || dados?.usuario || dados;
 
-            void AsyncStorage.setItem(
+          if (usuarioAPI && typeof usuarioAPI === "object") {
+            usuarioAtual = {
+              ...usuarioLocal,
+              ...usuarioAPI,
+            };
+
+            setUsuario(usuarioAtual);
+
+            await AsyncStorage.setItem(
               "usuario",
-              JSON.stringify(atualizado)
+              JSON.stringify(usuarioAtual)
             );
           }
         }
 
-        loadedRef.current = true;
-        ultimaAtualizacaoRef.current = Date.now();
+        if (!atual()) return;
 
-        // Salva cache
-        setUserProducts((up) => {
-          setTradedProducts((tp) => {
-            void savePerfilCache({
-              user: usuarioStorage,
-              userProducts: up,
-              tradedProducts: tp,
-            });
-            return tp;
+        const falhaLista =
+          resAnuncios.status === "rejected"
+            ? resAnuncios.reason
+            : resTrocados.status === "rejected"
+              ? resTrocados.reason
+              : null;
+
+        if (falhaLista) {
+          setAviso({
+            titulo: "Não foi possível atualizar",
+            mensagem: mensagemErro(
+              falhaLista,
+              "Uma das listas não pôde ser carregada. Tente atualizar novamente."
+            ),
           });
-          return up;
-        });
-      } catch (error) {
-        if (!signal?.aborted) {
-          console.warn("Erro ao carregar perfil:", error);
         }
+
+        const cache: PerfilCache = {
+          ts: Date.now(),
+          usuario: usuarioAtual,
+          anuncios: anunciosAtuais,
+          trocados: trocadosAtuais,
+        };
+
+        await AsyncStorage.setItem(
+          cacheKey,
+          JSON.stringify(cache)
+        ).catch(() => {});
+      } catch (error: any) {
+        if (!atual()) return;
+
+        setAviso({
+          titulo: "Erro",
+          mensagem: mensagemErro(
+            error,
+            error?.message || "Não foi possível carregar o perfil."
+          ),
+        });
       } finally {
-        carregandoRef.current = false;
-        setLoading(false);
+        if (atual()) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     },
-    []
+    [router]
   );
 
-  // ─── Primeiro fetch ────────────────────────────────────
-  useEffect(() => {
-    const ctrl = new AbortController();
-    carregarPerfil(true, true, ctrl.signal);
-    return () => ctrl.abort();
-  }, [carregarPerfil]);
-
-  // ─── Refresh em foco (throttled) ──────────────────────
   useFocusEffect(
     useCallback(() => {
-      if (!loadedRef.current) return;
-      if (Date.now() - ultimaAtualizacaoRef.current < CACHE_PERFIL) return;
+      const controller = new AbortController();
 
-      const ctrl = new AbortController();
-      carregarPerfil(false, false, ctrl.signal);
-      return () => ctrl.abort();
+      void carregarPerfil(controller.signal);
+
+      return () => {
+        controller.abort();
+      };
     }, [carregarPerfil])
   );
 
-  // ─── Helpers de mutação local ─────────────────────────
-  const removerProdutoLocal = useCallback((id: number) => {
-    setUserProducts((prev) => {
-      const novas = prev.filter(
-        (p) => Number(p.id_produto || p.id) !== Number(id)
-      );
-      setTradedProducts((tp) => {
-        void savePerfilCache({
-          user: usuarioStorageRef.current,
-          userProducts: novas,
-          tradedProducts: tp,
-        });
-        return tp;
-      });
-      return novas;
-    });
-  }, []);
-
-  const atualizarStatusLocal = useCallback((id: number, status: string) => {
-    setUserProducts((prev) => {
-      const novas = prev.map((p) =>
-        Number(p.id_produto || p.id) === Number(id)
-          ? { ...p, st_status: status }
-          : p
-      );
-      setTradedProducts((tp) => {
-        void savePerfilCache({
-          user: usuarioStorageRef.current,
-          userProducts: novas,
-          tradedProducts: tp,
-        });
-        return tp;
-      });
-      return novas;
-    });
-  }, []);
-
-  const recarregar = useCallback(() => {
-    ultimaAtualizacaoRef.current = 0;
-    carregarPerfil(false, true);
-  }, [carregarPerfil]);
-
-  return {
-    user,
-    userProducts,
-    tradedProducts,
-    loading,
-    obterToken,
-    recarregar,
-    removerProdutoLocal,
-    atualizarStatusLocal,
-  };
-}
-
-// ============================================================
-// TELA
-// ============================================================
-
-export default function ProfileScreen() {
-  const router = useRouter();
-
-  const {
-    user,
-    userProducts,
-    tradedProducts,
-    loading,
-    obterToken,
-    recarregar,
-    removerProdutoLocal,
-    atualizarStatusLocal,
-  } = usePerfil();
-
-  const [activeTab, setActiveTab] = useState<TabType>("anuncios");
-  const [limiteVisivel, setLimiteVisivel] = useState(LIMITE_INICIAL);
-
-  const [logoutModalVisible, setLogoutModalVisible] = useState(false);
-  const [selectedAd, setSelectedAd] = useState<any>(null);
-  const [optionsModalVisible, setOptionsModalVisible] = useState(false);
-  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
-  const [statusModalVisible, setStatusModalVisible] = useState(false);
-  const [processando, setProcessando] = useState(false);
-
   useEffect(() => {
-    setLimiteVisivel(LIMITE_INICIAL);
+    setLimite(LIMITE_INICIAL);
   }, [activeTab]);
 
-  // ─── Produtos exibidos ────────────────────────────────
-  const displayedProducts = useMemo(
-    () => (activeTab === "trocados" ? tradedProducts : userProducts),
-    [activeTab, tradedProducts, userProducts]
-  );
+  const produtos = activeTab === "trocados" ? trocados : anuncios;
+  const visiveis = produtos.slice(0, limite);
 
-  const produtosVisiveis = useMemo(
-    () => displayedProducts.slice(0, limiteVisivel),
-    [displayedProducts, limiteVisivel]
-  );
-
-  const temMais = displayedProducts.length > limiteVisivel;
-
-  // ─── Handlers ─────────────────────────────────────────
-  const handleOpenAdOptions = useCallback((item: any) => {
-    setSelectedAd(item);
+  const abrirOpcoes = useCallback((produto: Produto) => {
+    setSelectedAd(produto);
     setOptionsModalVisible(true);
   }, []);
 
-  const handleEditAd = useCallback(() => {
-    if (selectedAd?.st_status === "T") return;
+  function editarAnuncio() {
+    if (!selectedAd || selectedAd.st_status === "T") return;
 
     setOptionsModalVisible(false);
-    const productId = selectedAd?.id_produto || selectedAd?.id;
-    if (!productId) return;
 
     router.push({
       pathname: "/editaranuncio",
-      params: { id: String(productId) },
+      params: { id: String(selectedAd.id_produto) },
     } as any);
-  }, [selectedAd, router]);
+  }
 
-  const handleOpenDeleteModal = useCallback(() => {
-    setOptionsModalVisible(false);
-    setDeleteModalVisible(true);
-  }, []);
+  async function invalidarCache() {
+    const idUsuario = usuario?.id_usuario ?? usuario?.id;
 
-  const handleConfirmDelete = useCallback(async () => {
-    if (processando) return;
+    if (idUsuario) {
+      await AsyncStorage.removeItem(
+        `${CACHE_PREFIX}${idUsuario}`
+      );
+    }
+  }
+
+  async function alterarStatus(codigo: string) {
+    if (!selectedAd || mutationRef.current) return;
+
+    mutationRef.current = true;
     setProcessando(true);
 
-    const productId = selectedAd?.id_produto || selectedAd?.id;
+    try {
+      const token = await AsyncStorage.getItem("token");
+
+      if (!token) throw new Error("Sua sessão não foi encontrada.");
+
+      await api.put(
+        `/products/${selectedAd.id_produto}/status`,
+        { st_status: codigo },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/json",
+          },
+          timeout: TIMEOUT,
+        }
+      );
+
+      setStatusModalVisible(false);
+
+      await invalidarCache();
+      await carregarPerfil();
+    } catch (error: any) {
+      setStatusModalVisible(false);
+
+      setAviso({
+        titulo: "Erro",
+        mensagem: mensagemErro(
+          error,
+          error?.message || "Não foi possível alterar o status."
+        ),
+      });
+    } finally {
+      mutationRef.current = false;
+      setProcessando(false);
+    }
+  }
+
+  async function excluirAnuncio() {
+    if (!selectedAd || mutationRef.current) return;
+
+    mutationRef.current = true;
+    setProcessando(true);
 
     try {
-      const token = await obterToken();
-      if (!token || !productId) return;
+      const token = await AsyncStorage.getItem("token");
 
-      // Otimista: remove da UI imediatamente
-      removerProdutoLocal(productId);
+      if (!token) throw new Error("Sua sessão não foi encontrada.");
 
-      await api.delete(`/products/${productId}`, {
+      await api.delete(`/products/${selectedAd.id_produto}`, {
         headers: {
-          Accept: "application/json",
           Authorization: `Bearer ${token}`,
+          Accept: "application/json",
         },
-        timeout: TEMPO_LIMITE_REQUISICAO,
+        timeout: TIMEOUT,
       });
 
-      recarregar();
-    } catch (error: any) {
-      // Reverte
-      recarregar();
-      console.warn(
-        "Erro ao excluir:",
-        error?.response?.data || error?.message
+      const id = selectedAd.id_produto;
+
+      setAnuncios((lista) =>
+        lista.filter((produto) => produto.id_produto !== id)
       );
-    } finally {
-      setProcessando(false);
+
+      setTrocados((lista) =>
+        lista.filter((produto) => produto.id_produto !== id)
+      );
+
       setDeleteModalVisible(false);
       setSelectedAd(null);
+
+      await invalidarCache();
+      await carregarPerfil();
+    } catch (error: any) {
+      setDeleteModalVisible(false);
+
+      setAviso({
+        titulo: "Erro",
+        mensagem: mensagemErro(
+          error,
+          error?.message || "Não foi possível excluir o anúncio."
+        ),
+      });
+    } finally {
+      mutationRef.current = false;
+      setProcessando(false);
     }
-  }, [selectedAd, obterToken, removerProdutoLocal, recarregar, processando]);
+  }
 
-  const handleUpdateStatus = useCallback(
-    async (novoStatus: string) => {
-      if (processando) return;
-      setProcessando(true);
+  async function sairDaConta() {
+    if (mutationRef.current) return;
 
-      const productId = selectedAd?.id_produto || selectedAd?.id;
+    mutationRef.current = true;
+    setProcessando(true);
 
-      const codigoMap: Record<string, string> = {
-        Disponível: "A",
-        "Em Negociação": "N",
-        Trocado: "T",
-      };
-      const statusCodigo = codigoMap[novoStatus];
+    // Impede uma requisição antiga de restaurar os dados.
+    requestIdRef.current += 1;
 
-      try {
-        const token = await obterToken();
-        if (!token || !productId || !statusCodigo) return;
-
-        // Otimista
-        atualizarStatusLocal(productId, statusCodigo);
-
-        await api.put(
-          `/products/${productId}/status`,
-          { st_status: statusCodigo },
-          {
-            headers: {
-              Accept: "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            timeout: TEMPO_LIMITE_REQUISICAO,
-          }
-        );
-
-        recarregar();
-      } catch (error: any) {
-        recarregar();
-        console.warn(
-          "Erro ao alterar status:",
-          error?.response?.data || error?.message
-        );
-      } finally {
-        setProcessando(false);
-        setStatusModalVisible(false);
-      }
-    },
-    [selectedAd, obterToken, atualizarStatusLocal, recarregar, processando]
-  );
-
-  const sairDaConta = useCallback(async () => {
     try {
-      const token = await obterToken();
+      const token = await AsyncStorage.getItem("token");
+
       if (token) {
         await api
           .post(
@@ -687,385 +761,395 @@ export default function ProfileScreen() {
             {},
             {
               headers: {
-                Accept: "application/json",
                 Authorization: `Bearer ${token}`,
+                Accept: "application/json",
               },
+              timeout: TIMEOUT,
             }
           )
           .catch(() => {});
       }
-    } catch {}
 
-    await AsyncStorage.multiRemove(["token", "usuario"]);
-    router.replace("/(auth)/login");
-  }, [obterToken, router]);
+      await invalidarCache();
 
-  const handleChangeTab = useCallback(
-    (tab: TabType) => {
-      if (tab === "favoritos") {
-        router.push("/favoritos" as any);
-        return;
-      }
-      setActiveTab(tab);
-    },
-    [router]
-  );
+      await AsyncStorage.multiRemove([
+        "token",
+        "usuario",
+        "@pecapeca:perfil_cache_v1",
+      ]);
 
-  const carregarMais = useCallback(
-    () => setLimiteVisivel((v) => v + LIMITE_INICIAL),
-    []
-  );
+      setLogoutModalVisible(false);
 
-  // ─── Empty message ────────────────────────────────────
-  const emptyMessage = useMemo(
-    () =>
-      activeTab === "trocados"
-        ? "Você ainda não possui anúncios trocados."
-        : "Você ainda não possui anúncios cadastrados.",
-    [activeTab]
-  );
+      router.replace("/(auth)/login" as any);
+    } catch {
+      setAviso({
+        titulo: "Erro",
+        mensagem: "Não foi possível encerrar a sessão local.",
+      });
+    } finally {
+      mutationRef.current = false;
+      setProcessando(false);
+    }
+  }
 
-  // ─── Render Item ──────────────────────────────────────
-  const renderItem = useCallback(
-    ({ item }: { item: any }) => (
-      <ProductCard item={item} onOpenOptions={handleOpenAdOptions} />
-    ),
-    [handleOpenAdOptions]
-  );
-
-  const keyExtractor = useCallback(
-    (item: any) => String(item.id_produto || item.id),
-    []
-  );
-
-  // ─── Header (memoizado) ───────────────────────────────
-  const ListHeader = useMemo(
-    () => (
-      <View>
-        {/* BANNER */}
-        <View style={styles.bannerContainer}>
-          {getImageUrl(user.banner) ? (
-            <Image
-              source={{ uri: getImageUrl(user.banner)! }}
-              style={styles.bannerImage}
-              fadeDuration={150}
-            />
-          ) : (
-            <View style={styles.bannerPlaceholder}>
-              <Feather name="image" size={35} color="#0099FF" />
-            </View>
-          )}
-        </View>
-
-        {/* DADOS DO USUÁRIO */}
-        <View style={styles.profileInfoContainer}>
-          <View style={styles.roundAvatar}>
-            {getImageUrl(user.fotoPerfil) ? (
-              <Image
-                source={{ uri: getImageUrl(user.fotoPerfil)! }}
-                style={styles.profileImage}
-                fadeDuration={150}
-              />
-            ) : (
-              <Feather name="user" size={45} color="#005386" />
-            )}
-          </View>
-
-          <View style={styles.userInfoTextContainer}>
-            <Text style={styles.userName}>{user.name || "Usuário"}</Text>
-
-            <View style={styles.addressRow}>
-              <Feather
-                name="file-text"
-                size={12}
-                color="#0099FF"
-                style={styles.addressIcon}
-              />
-              <Text style={styles.userSubtext} numberOfLines={2}>
-                {user.description}
-              </Text>
-            </View>
-
-            <TouchableOpacity
-              style={styles.editProfileButton}
-              onPress={() => router.push("/perfil/editarPerfil" as any)}
-              activeOpacity={0.7}
-            >
-              <Feather name="edit-3" size={14} color="#FFFFFF" />
-              <Text style={styles.editProfileText}>Editar perfil</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* AVALIAÇÃO */}
-        <View style={styles.ratingContainer}>
-          <View style={styles.starsRow}>
-            {[0, 1, 2, 3, 4].map((i) => (
-              <Feather
-                key={i}
-                name="star"
-                size={18}
-                color="#005386"
-                style={i < 4 ? styles.starIcon : undefined}
-              />
-            ))}
-          </View>
-          <Text style={styles.ratingText}>— {user.rating}</Text>
-        </View>
-
-        {/* ABAS */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.tabsContainer}
-        >
-          {(
-            [
-              ["anuncios", "Anúncios"],
-              ["trocados", "Anúncios trocados"],
-              ["favoritos", "Favoritos"],
-            ] as const
-          ).map(([key, label]) => {
-            const isActive = activeTab === key;
-            const isFav = key === "favoritos";
-            return (
-              <TouchableOpacity
-                key={key}
-                style={[
-                  styles.tabItem,
-                  isFav && styles.favoriteTabItem,
-                  isActive && styles.activeTab,
-                ]}
-                onPress={() => handleChangeTab(key)}
-                activeOpacity={0.7}
-              >
-                <Text
-                  style={[styles.tabText, isActive && styles.activeTabText]}
-                >
-                  {label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-      </View>
-    ),
-    [user, activeTab, handleChangeTab, router]
-  );
-
-  // ==========================================================
-  // RENDER
-  // ==========================================================
+  const banner = getImageUrl(usuario?.ds_banner);
+  const fotoPerfil = getImageUrl(usuario?.ds_foto_perfil);
 
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar style="dark" />
 
-      {/* HEADER */}
       <View style={styles.header}>
         <TouchableOpacity
-          onPress={() => {
-            if (router.canGoBack()) router.back();
-            else router.replace("/(tabs)");
-          }}
           style={styles.headerButton}
+          onPress={() => {
+            if (router.canGoBack()) {
+              router.back();
+            } else {
+              router.replace("/(tabs)" as any);
+            }
+          }}
+          accessibilityLabel="Voltar"
         >
           <Feather name="arrow-left" size={24} color="#005386" />
         </TouchableOpacity>
 
-        <TouchableOpacity
-          onPress={() => router.push("/perfil/configuracoes" as any)}
-          style={styles.headerButton}
-        >
-          <Feather name="settings" size={22} color="#005386" />
-        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Meu perfil</Text>
+
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={styles.headerButton}
+            onPress={() =>
+              router.push("/perfil/configuracoes" as any)
+            }
+            accessibilityLabel="Configurações"
+          >
+            <Feather name="settings" size={22} color="#005386" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.headerButton}
+            onPress={() => setLogoutModalVisible(true)}
+            accessibilityLabel="Sair da conta"
+          >
+            <Feather name="log-out" size={22} color="#005386" />
+          </TouchableOpacity>
+        </View>
       </View>
 
-      {/* CONTEÚDO */}
       <FlatList
-        data={loading && userProducts.length === 0 ? [] : produtosVisiveis}
-        keyExtractor={keyExtractor}
+        data={visiveis}
         numColumns={2}
+        keyExtractor={(item) => String(item.id_produto)}
         columnWrapperStyle={styles.gridRow}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
-        ListHeaderComponent={ListHeader}
-        renderItem={renderItem}
-        initialNumToRender={6}
-        maxToRenderPerBatch={8}
-        windowSize={7}
-        removeClippedSubviews={Platform.OS !== "web"}
-        ListEmptyComponent={
-          loading && userProducts.length === 0 ? (
-            <View style={styles.skeletonGrid}>
-              <View style={styles.gridRow}>
-                <SkeletonCard />
-                <SkeletonCard />
+        refreshing={refreshing}
+        onRefresh={() => void carregarPerfil()}
+        renderItem={({ item }) => (
+          <ProductCard
+            item={item}
+            largura={larguraCard}
+            onOpenOptions={abrirOpcoes}
+          />
+        )}
+        ListHeaderComponent={
+          <View>
+            <View style={styles.bannerContainer}>
+              {banner ? (
+                <Image
+                  source={{ uri: banner }}
+                  style={styles.fullImage}
+                  resizeMode="cover"
+                />
+              ) : (
+                <View style={styles.bannerPlaceholder}>
+                  <Feather
+                    name="image"
+                    size={35}
+                    color="#0099FF"
+                  />
+                </View>
+              )}
+            </View>
+
+            <View style={styles.profileInfo}>
+              <View style={styles.avatar}>
+                {fotoPerfil ? (
+                  <Image
+                    source={{ uri: fotoPerfil }}
+                    style={styles.fullImage}
+                  />
+                ) : (
+                  <Feather
+                    name="user"
+                    size={42}
+                    color="#005386"
+                  />
+                )}
               </View>
-              <View style={styles.gridRow}>
-                <SkeletonCard />
-                <SkeletonCard />
+
+              <View style={styles.userInfo}>
+                <Text style={styles.userName}>
+                  {usuario?.nm_usuario || "Usuário"}
+                </Text>
+
+                <Text style={styles.description} numberOfLines={3}>
+                  {usuario?.ds_usuario || "Descrição não informada"}
+                </Text>
+
+                <TouchableOpacity
+                  style={styles.editProfileButton}
+                  onPress={() =>
+                    router.push("/perfil/editarPerfil" as any)
+                  }
+                >
+                  <Feather
+                    name="edit-3"
+                    size={14}
+                    color="#FFFFFF"
+                  />
+                  <Text style={styles.editProfileText}>
+                    Editar perfil
+                  </Text>
+                </TouchableOpacity>
               </View>
             </View>
+
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.tabsContainer}
+            >
+              <TouchableOpacity
+                style={[
+                  styles.tab,
+                  activeTab === "anuncios" && styles.activeTab,
+                ]}
+                onPress={() => setActiveTab("anuncios")}
+              >
+                <Text
+                  style={[
+                    styles.tabText,
+                    activeTab === "anuncios" && styles.activeTabText,
+                  ]}
+                >
+                  Anúncios
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.tab,
+                  activeTab === "trocados" && styles.activeTab,
+                ]}
+                onPress={() => setActiveTab("trocados")}
+              >
+                <Text
+                  style={[
+                    styles.tabText,
+                    activeTab === "trocados" && styles.activeTabText,
+                  ]}
+                >
+                  Anúncios trocados
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.tab}
+                onPress={() => router.push("/favoritos" as any)}
+              >
+                <Text style={styles.tabText}>Favoritos</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        }
+        ListEmptyComponent={
+          loading ? (
+            <View style={styles.loadingBox}>
+              <ActivityIndicator size="large" color="#0099FF" />
+              <Text style={styles.emptyText}>
+                Carregando produtos...
+              </Text>
+            </View>
           ) : (
-            <Text style={styles.emptyText}>{emptyMessage}</Text>
+            <Text style={styles.emptyText}>
+              {activeTab === "trocados"
+                ? "Você ainda não possui anúncios trocados."
+                : "Você ainda não possui anúncios cadastrados."}
+            </Text>
           )
         }
         ListFooterComponent={
-          temMais ? (
+          produtos.length > limite ? (
             <TouchableOpacity
               style={styles.loadMoreButton}
-              onPress={carregarMais}
-              activeOpacity={0.8}
+              onPress={() =>
+                setLimite((valor) => valor + LIMITE_INICIAL)
+              }
             >
-              <Text style={styles.loadMoreText}>
-                Ver mais ({displayedProducts.length - limiteVisivel})
-              </Text>
-              <Feather name="chevron-down" size={16} color="#005386" />
+              <Text style={styles.loadMoreText}>Carregar mais</Text>
+              <Feather
+                name="chevron-down"
+                size={18}
+                color="#005386"
+              />
             </TouchableOpacity>
           ) : null
         }
       />
 
-      {/* MODAL DE OPÇÕES */}
       <Modal
-        animationType="fade"
-        transparent
         visible={optionsModalVisible}
+        transparent
+        animationType="slide"
         onRequestClose={() => setOptionsModalVisible(false)}
       >
-        <TouchableOpacity
-          style={styles.adModalOverlay}
-          activeOpacity={1}
-          onPress={() => setOptionsModalVisible(false)}
-        >
-          <View style={styles.adModalContent}>
-            <Text style={styles.adModalTitle} numberOfLines={1}>
-              {selectedAd?.nm_produto}
+        <View style={styles.bottomOverlay}>
+          <View style={styles.bottomModal}>
+            <Text style={styles.modalTitle}>
+              {selectedAd?.nm_produto || "Anúncio"}
             </Text>
-            <Text style={styles.adModalSubtitle}>
-              Escolha a ação desejada:
+
+            <Text style={styles.modalSubtitle}>
+              Escolha a ação desejada
             </Text>
 
             {selectedAd?.st_status !== "T" && (
               <TouchableOpacity
-                style={styles.adOptionButton}
-                onPress={handleEditAd}
+                style={styles.optionButton}
+                onPress={editarAnuncio}
               >
-                <Feather name="edit-3" size={20} color="#005386" />
-                <Text style={styles.adOptionText}>Editar Anúncio</Text>
+                <Feather
+                  name="edit-3"
+                  size={20}
+                  color="#005386"
+                />
+                <Text style={styles.optionText}>
+                  Editar anúncio
+                </Text>
               </TouchableOpacity>
             )}
 
             <TouchableOpacity
-              style={styles.adOptionButton}
+              style={styles.optionButton}
               onPress={() => {
                 setOptionsModalVisible(false);
                 setStatusModalVisible(true);
               }}
             >
               <Feather name="sliders" size={20} color="#005386" />
-              <Text style={styles.adOptionText}>Alterar Status do Item</Text>
+              <Text style={styles.optionText}>Alterar status</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.adOptionButton, styles.adOptionDeleteButton]}
-              onPress={handleOpenDeleteModal}
+              style={[styles.optionButton, styles.deleteOption]}
+              onPress={() => {
+                setOptionsModalVisible(false);
+                setDeleteModalVisible(true);
+              }}
             >
               <Feather name="trash-2" size={20} color="#FF3B30" />
-              <Text style={[styles.adOptionText, styles.adOptionDeleteText]}>
-                Excluir Anúncio
+              <Text style={[styles.optionText, styles.deleteText]}>
+                Excluir anúncio
               </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.adCancelButton}
+              style={styles.cancelAction}
               onPress={() => setOptionsModalVisible(false)}
             >
-              <Text style={styles.adCancelText}>Cancelar</Text>
+              <Text style={styles.cancelText}>Cancelar</Text>
             </TouchableOpacity>
           </View>
-        </TouchableOpacity>
+        </View>
       </Modal>
 
-      {/* MODAL DE STATUS */}
       <Modal
-        animationType="fade"
-        transparent
         visible={statusModalVisible}
-        onRequestClose={() => setStatusModalVisible(false)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!processando) setStatusModalVisible(false);
+        }}
       >
-        <TouchableOpacity
-          style={styles.adModalOverlay}
-          activeOpacity={1}
-          onPress={() => setStatusModalVisible(false)}
-        >
-          <View style={styles.adModalContent}>
-            <Text style={styles.adModalTitle}>Alterar Status</Text>
-            <Text style={styles.adModalSubtitle}>
-              Selecione o estado atual do produto:
+        <View style={styles.bottomOverlay}>
+          <View style={styles.bottomModal}>
+            <Text style={styles.modalTitle}>Alterar status</Text>
+
+            <Text style={styles.modalSubtitle}>
+              Selecione a disponibilidade do produto
             </Text>
 
-            {[
-              ["Disponível", "check-circle", "#28A745"],
-              ["Em Negociação", "clock", "#FF9900"],
-              ["Trocado", "x-circle", "#6C757D"],
-            ].map(([label, icon, color]) => (
+            {OPCOES_STATUS.map((opcao) => (
               <TouchableOpacity
-                key={label}
-                style={styles.adOptionButton}
-                onPress={() => handleUpdateStatus(label)}
+                key={opcao.codigo}
+                style={styles.optionButton}
+                onPress={() => void alterarStatus(opcao.codigo)}
                 disabled={processando}
               >
-                <Feather name={icon as any} size={20} color={color} />
-                <Text style={styles.adOptionText}>{label}</Text>
+                <Feather
+                  name={opcao.icone}
+                  size={20}
+                  color={opcao.cor}
+                />
+                <Text style={styles.optionText}>
+                  {opcao.nome}
+                </Text>
               </TouchableOpacity>
             ))}
 
+            {processando && (
+              <ActivityIndicator color="#0099FF" />
+            )}
+
             <TouchableOpacity
-              style={styles.adCancelButton}
+              style={styles.cancelAction}
               onPress={() => setStatusModalVisible(false)}
               disabled={processando}
             >
-              <Text style={styles.adCancelText}>Cancelar</Text>
+              <Text style={styles.cancelText}>Cancelar</Text>
             </TouchableOpacity>
           </View>
-        </TouchableOpacity>
+        </View>
       </Modal>
 
-      {/* MODAL DE EXCLUSÃO */}
       <Modal
-        animationType="fade"
-        transparent
         visible={deleteModalVisible}
-        onRequestClose={() => setDeleteModalVisible(false)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!processando) setDeleteModalVisible(false);
+        }}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.deleteModalTitle}>Confirmar Exclusão</Text>
-            <Text style={styles.deleteModalSubtitle}>
-              Tem certeza que deseja remover o anúncio "{selectedAd?.nm_produto}
-              "? Esta ação não pode ser desfeita.
+        <View style={styles.centerOverlay}>
+          <View style={styles.dialog}>
+            <Text style={[styles.modalTitle, styles.deleteText]}>
+              Excluir anúncio?
             </Text>
 
-            <View style={styles.modalButtonsRow}>
+<Text style={styles.dialogMessage}>
+  {`Deseja remover o anúncio "${selectedAd?.nm_produto ?? ""}"?`}
+</Text>
+
+            <View style={styles.dialogActions}>
               <TouchableOpacity
-                style={styles.cancelLogoutButton}
+                style={styles.cancelButton}
                 onPress={() => setDeleteModalVisible(false)}
                 disabled={processando}
               >
-                <Text style={styles.cancelLogoutText}>Cancelar</Text>
+                <Text style={styles.cancelText}>Cancelar</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.confirmDeleteButton}
-                onPress={handleConfirmDelete}
+                style={[styles.confirmButton, styles.redButton]}
+                onPress={() => void excluirAnuncio()}
                 disabled={processando}
               >
                 {processando ? (
-                  <ActivityIndicator size="small" color="#FFF" />
+                  <ActivityIndicator color="#FFFFFF" />
                 ) : (
-                  <Text style={styles.confirmDeleteText}>Excluir</Text>
+                  <Text style={styles.whiteText}>Excluir</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -1073,38 +1157,71 @@ export default function ProfileScreen() {
         </View>
       </Modal>
 
-      {/* MODAL DE LOGOUT (oculto, caso queira usar depois) */}
       <Modal
-        animationType="fade"
-        transparent
         visible={logoutModalVisible}
-        onRequestClose={() => setLogoutModalVisible(false)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!processando) setLogoutModalVisible(false);
+        }}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.logoutModalTitle}>Deseja sair da conta?</Text>
-            <Text style={styles.logoutModalSubtitle}>
-              Ao confirmar, sua sessão atual será encerrada com segurança.
+        <View style={styles.centerOverlay}>
+          <View style={styles.dialog}>
+            <Text style={styles.modalTitle}>
+              Deseja sair da conta?
             </Text>
 
-            <View style={styles.modalButtonsRow}>
+            <Text style={styles.dialogMessage}>
+              Sua sessão atual será encerrada.
+            </Text>
+
+            <View style={styles.dialogActions}>
               <TouchableOpacity
-                style={styles.cancelLogoutButton}
+                style={styles.cancelButton}
                 onPress={() => setLogoutModalVisible(false)}
+                disabled={processando}
               >
-                <Text style={styles.cancelLogoutText}>Cancelar</Text>
+                <Text style={styles.cancelText}>Cancelar</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.confirmLogoutButton}
-                onPress={async () => {
-                  setLogoutModalVisible(false);
-                  await sairDaConta();
-                }}
+                style={styles.confirmButton}
+                onPress={() => void sairDaConta()}
+                disabled={processando}
               >
-                <Text style={styles.confirmLogoutText}>Sair</Text>
+                {processando ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.whiteText}>Sair</Text>
+                )}
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={aviso !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setAviso(null)}
+      >
+        <View style={styles.centerOverlay}>
+          <View style={styles.dialog}>
+            <Text style={styles.modalTitle}>
+              {aviso?.titulo}
+            </Text>
+
+            <Text style={styles.dialogMessage}>
+              {aviso?.mensagem}
+            </Text>
+
+            <TouchableOpacity
+              style={styles.okButton}
+              onPress={() => setAviso(null)}
+            >
+              <Text style={styles.whiteText}>OK</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -1112,94 +1229,92 @@ export default function ProfileScreen() {
   );
 }
 
-// ============================================================
-// ESTILOS
-// ============================================================
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff" },
-
+  container: {
+    flex: 1,
+    backgroundColor: "#FFFFFF",
+  },
   header: {
-    height: 60,
+    minHeight: 60,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 16,
-    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 12,
     borderBottomWidth: 1,
     borderBottomColor: "#EEEEEE",
   },
-  headerButton: { padding: 6 },
-
+  headerButton: {
+    padding: 8,
+  },
+  headerTitle: {
+    color: "#005386",
+    fontSize: 16,
+    fontFamily: "Montserrat_700Bold",
+  },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
   listContent: {
     paddingHorizontal: 16,
     paddingBottom: 30,
   },
-
-  // ============ BANNER ============
   bannerContainer: {
-    width: "100%",
     height: 150,
     marginTop: 15,
     borderRadius: 14,
     overflow: "hidden",
     backgroundColor: "#E4F8FF",
   },
-  bannerImage: { width: "100%", height: "100%" },
-  bannerPlaceholder: {
+  fullImage: {
     width: "100%",
     height: "100%",
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "#E4F8FF",
   },
-
-  // ============ PERFIL ============
-  profileInfoContainer: {
+  bannerPlaceholder: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  profileInfo: {
     flexDirection: "row",
     alignItems: "center",
     marginTop: 15,
   },
-  roundAvatar: {
+  avatar: {
     width: 86,
     height: 86,
     borderRadius: 43,
+    overflow: "hidden",
     backgroundColor: "#E4F8FF",
-    justifyContent: "center",
-    alignItems: "center",
     borderWidth: 1.5,
     borderColor: "#0099FF",
-    elevation: 3,
-    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  profileImage: { width: "100%", height: "100%" },
-  userInfoTextContainer: { marginLeft: 16, flex: 1 },
+  userInfo: {
+    flex: 1,
+    marginLeft: 16,
+  },
   userName: {
     fontFamily: "Montserrat_700Bold",
     fontSize: 19,
     color: "#005386",
   },
-  addressRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 4,
-  },
-  addressIcon: { marginRight: 4 },
-  userSubtext: {
+  description: {
     fontFamily: "Montserrat_400Regular",
     fontSize: 13,
     color: "#777777",
-    flex: 1,
+    marginTop: 5,
+    lineHeight: 19,
   },
   editProfileButton: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
     alignSelf: "flex-start",
     backgroundColor: "#0099FF",
     borderRadius: 8,
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 8,
     marginTop: 8,
   },
   editProfileText: {
@@ -1208,37 +1323,15 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     marginLeft: 5,
   },
-
-  // ============ AVALIAÇÃO ============
-  ratingContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 15,
-    paddingLeft: 4,
-  },
-  starsRow: { flexDirection: "row", alignItems: "center" },
-  starIcon: { marginRight: 4 },
-  ratingText: {
-    fontFamily: "Montserrat_600SemiBold",
-    fontSize: 14,
-    color: "#005386",
-    marginLeft: 8,
-  },
-
-  // ============ ABAS ============
   tabsContainer: {
     marginVertical: 20,
     borderBottomWidth: 1,
-    borderBottomColor: "#eee",
-    paddingBottom: 4,
+    borderBottomColor: "#EEEEEE",
   },
-  tabItem: {
-    marginRight: 24,
-    paddingBottom: 8,
-    flexDirection: "row",
-    alignItems: "center",
+  tab: {
+    marginRight: 22,
+    paddingBottom: 10,
   },
-  favoriteTabItem: { marginRight: 8 },
   activeTab: {
     borderBottomWidth: 2,
     borderBottomColor: "#0099FF",
@@ -1246,39 +1339,114 @@ const styles = StyleSheet.create({
   tabText: {
     fontFamily: "Montserrat_500Medium",
     fontSize: 14,
-    color: "#888",
+    color: "#888888",
   },
   activeTabText: {
     fontFamily: "Montserrat_700Bold",
     color: "#005386",
   },
-
-  // ============ GRID ============
   gridRow: {
     justifyContent: "space-between",
   },
   listingCard: {
-    width: ITEM_WIDTH,
-    marginBottom: 20,
+    marginBottom: 18,
     backgroundColor: "#FFFFFF",
     borderRadius: 14,
     borderWidth: 1,
     borderColor: "#EEEEEE",
     overflow: "hidden",
-    elevation: 2,
   },
-  imagePlaceholder: {
+  galeria: {
     width: "100%",
-    height: ITEM_WIDTH,
+    position: "relative",
     backgroundColor: "#F5FBFF",
+    overflow: "hidden",
+  },
+  productImage: {
+    width: "100%",
+    height: "100%",
+  },
+  fotoVazia: {
+    flex: 1,
+    width: "100%",
+    height: "100%",
     justifyContent: "center",
     alignItems: "center",
+    backgroundColor: "#F5FBFF",
   },
-  productImage: { width: "100%", height: "100%" },
-  textPlaceholderRow: {
-    marginTop: 8,
-    paddingHorizontal: 8,
-    paddingBottom: 8,
+  setaFoto: {
+    position: "absolute",
+    top: "50%",
+    marginTop: -16,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 3,
+    elevation: 3,
+  },
+  setaEsquerda: {
+    left: 5,
+  },
+  setaDireita: {
+    right: 5,
+  },
+  contadorFoto: {
+    position: "absolute",
+    right: 7,
+    top: 7,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    borderRadius: 10,
+    backgroundColor: "rgba(0,0,0,0.6)",
+  },
+  contadorTexto: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontFamily: "Montserrat_600SemiBold",
+  },
+  paginacao: {
+    position: "absolute",
+    bottom: 3,
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    justifyContent: "center",
+  },
+  areaPonto: {
+    width: 23,
+    height: 26,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  ponto: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#D7E6EF",
+  },
+  pontoAtivo: {
+    width: 13,
+    backgroundColor: "#0099FF",
+  },
+  trocadoBadge: {
+    position: "absolute",
+    left: 7,
+    top: 7,
+    borderRadius: 8,
+    backgroundColor: "#005386",
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+  },
+  trocadoTexto: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontFamily: "Montserrat_600SemiBold",
+  },
+  cardInfo: {
+    padding: 9,
   },
   listingTitle: {
     fontFamily: "Montserrat_600SemiBold",
@@ -1289,200 +1457,161 @@ const styles = StyleSheet.create({
     fontFamily: "Montserrat_500Medium",
     fontSize: 11,
     color: "#0099FF",
-    marginTop: 3,
+    marginTop: 4,
   },
   cardFooterRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    marginTop: 3,
+    justifyContent: "space-between",
+    marginTop: 6,
   },
-  listingPrice: {
+  listingCondition: {
     fontFamily: "Montserrat_400Regular",
     fontSize: 11,
     color: "#777777",
   },
-  moreOptionsButton: { padding: 4 },
-
-  // ============ SKELETON ============
-  skeletonGrid: { gap: 0 },
-  skeletonBlock: { backgroundColor: "#EAF3FA" },
-  skeletonLine: { backgroundColor: "#EAF3FA", borderRadius: 4 },
-
-  // ============ EMPTY ============
-  emptyText: {
-    textAlign: "center",
-    fontFamily: "Montserrat_400Regular",
-    color: "#888",
-    marginTop: 40,
-    fontSize: 14,
+  loadingBox: {
+    paddingVertical: 30,
+    alignItems: "center",
   },
-
-  // ============ LOAD MORE ============
+  emptyText: {
+    fontFamily: "Montserrat_400Regular",
+    color: "#888888",
+    fontSize: 14,
+    textAlign: "center",
+    marginTop: 20,
+    marginBottom: 20,
+  },
   loadMoreButton: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
+    gap: 8,
     paddingVertical: 14,
     borderRadius: 12,
     backgroundColor: "#F1FAFF",
     borderWidth: 1,
     borderColor: "#DCEEFA",
-    marginTop: 8,
-    gap: 6,
   },
   loadMoreText: {
+    fontFamily: "Montserrat_600SemiBold",
     fontSize: 13,
     color: "#005386",
-    fontFamily: "Montserrat_600SemiBold",
   },
-
-  // ============ MODAIS ============
-  adModalOverlay: {
+  bottomOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.4)",
     justifyContent: "flex-end",
+    backgroundColor: "rgba(0,0,0,0.45)",
   },
-  adModalContent: {
+  bottomModal: {
+    padding: 20,
+    paddingBottom: 30,
     backgroundColor: "#FFFFFF",
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    padding: 20,
-    alignItems: "center",
   },
-  adModalTitle: {
+  modalTitle: {
     fontFamily: "Montserrat_700Bold",
-    fontSize: 16,
-    color: "#333333",
+    fontSize: 18,
+    color: "#005386",
+    textAlign: "center",
+    marginBottom: 8,
   },
-  adModalSubtitle: {
+  modalSubtitle: {
     fontFamily: "Montserrat_400Regular",
     fontSize: 12,
     color: "#777777",
-    marginBottom: 16,
-    marginTop: 2,
+    textAlign: "center",
+    marginBottom: 18,
   },
-  adOptionButton: {
+  optionButton: {
     flexDirection: "row",
     alignItems: "center",
-    width: "100%",
     paddingVertical: 14,
     paddingHorizontal: 16,
     borderRadius: 10,
     backgroundColor: "#F5FBFF",
     marginBottom: 10,
   },
-  adOptionText: {
+  optionText: {
     fontFamily: "Montserrat_600SemiBold",
-    fontSize: 15,
+    fontSize: 14,
     color: "#005386",
     marginLeft: 12,
   },
-  adOptionDeleteButton: { backgroundColor: "#FFF0F0" },
-  adOptionDeleteText: { color: "#FF3B30" },
-  adCancelButton: {
-    marginTop: 6,
-    paddingVertical: 10,
-    width: "100%",
-    alignItems: "center",
+  deleteOption: {
+    backgroundColor: "#FFF0F0",
   },
-  adCancelText: {
-    fontFamily: "Montserrat_500Medium",
-    fontSize: 14,
-    color: "#888888",
-  },
-
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 24,
-  },
-  modalContent: {
-    width: "100%",
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 24,
-    alignItems: "center",
-    elevation: 5,
-  },
-  deleteModalTitle: {
-    fontFamily: "Montserrat_700Bold",
-    fontSize: 18,
+  deleteText: {
     color: "#FF3B30",
-    marginBottom: 8,
-    textAlign: "center",
   },
-  deleteModalSubtitle: {
-    fontFamily: "Montserrat_400Regular",
-    fontSize: 14,
-    color: "#666666",
-    textAlign: "center",
-    lineHeight: 20,
-    marginBottom: 24,
-  },
-  logoutModalTitle: {
-    fontFamily: "Montserrat_700Bold",
-    fontSize: 18,
-    color: "#005386",
-    marginBottom: 8,
-    textAlign: "center",
-  },
-  logoutModalSubtitle: {
-    fontFamily: "Montserrat_400Regular",
-    fontSize: 14,
-    color: "#666666",
-    textAlign: "center",
-    lineHeight: 20,
-    marginBottom: 24,
-    paddingHorizontal: 8,
-  },
-  modalButtonsRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    width: "100%",
-  },
-  cancelLogoutButton: {
-    flex: 1,
-    height: 44,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#0099FF",
-    justifyContent: "center",
+  cancelAction: {
     alignItems: "center",
-    marginRight: 12,
-    backgroundColor: "#fff",
+    paddingVertical: 12,
   },
-  cancelLogoutText: {
+  cancelText: {
     fontFamily: "Montserrat_600SemiBold",
     fontSize: 14,
     color: "#005386",
   },
-  confirmDeleteButton: {
+  centerOverlay: {
     flex: 1,
-    height: 44,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  dialog: {
+    width: "100%",
+    maxWidth: 420,
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
+    padding: 24,
+  },
+  dialogMessage: {
+    fontFamily: "Montserrat_400Regular",
+    fontSize: 14,
+    color: "#666666",
+    lineHeight: 21,
+    textAlign: "center",
+    marginTop: 8,
+  },
+  dialogActions: {
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 24,
+  },
+  cancelButton: {
+    flex: 1,
+    minHeight: 46,
     borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#0099FF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  confirmButton: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: 8,
+    backgroundColor: "#0099FF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  redButton: {
     backgroundColor: "#FF3B30",
-    justifyContent: "center",
-    alignItems: "center",
   },
-  confirmDeleteText: {
-    fontFamily: "Montserrat_700Bold",
+  whiteText: {
+    fontFamily: "Montserrat_600SemiBold",
     fontSize: 14,
-    color: "#fff",
+    color: "#FFFFFF",
   },
-  confirmLogoutButton: {
-    flex: 1,
-    height: 44,
+  okButton: {
+    minHeight: 46,
     borderRadius: 8,
-    backgroundColor: "#0099ff",
-    justifyContent: "center",
+    backgroundColor: "#0099FF",
     alignItems: "center",
-  },
-  confirmLogoutText: {
-    fontFamily: "Montserrat_700Bold",
-    fontSize: 14,
-    color: "#fff",
+    justifyContent: "center",
+    marginTop: 24,
   },
 });

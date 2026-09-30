@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+
 import {
   ActivityIndicator,
   Alert,
@@ -12,6 +13,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+
 import { Feather, Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -26,29 +28,56 @@ export default function ProductDetailScreen() {
   const [product, setProduct] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
+  // =========================================================
+  // IMAGENS
+  // =========================================================
+
   const [activeImageIndex, setActiveImageIndex] = useState(0);
 
-  const [solicitandoTroca, setSolicitandoTroca] = useState(false);
-  const [modalVisible, setModalVisible] = useState(false);
+  const imageListRef = useRef<FlatList<any>>(null);
 
-  const [meusProdutos, setMeusProdutos] = useState<any[]>([]);
-  const [selectedProductId, setSelectedProductId] = useState<string | null>(
-    null
-  );
+  // =========================================================
+  // TROCA
+  // =========================================================
 
-  const [favoritado, setFavoritado] = useState(false);
-  const [carregandoFavorito, setCarregandoFavorito] = useState(false);
+  const [solicitandoTroca, setSolicitandoTroca] =
+    useState(false);
+
+  const [modalVisible, setModalVisible] =
+    useState(false);
+
+  const [meusProdutos, setMeusProdutos] =
+    useState<any[]>([]);
+
+  const [selectedProductId, setSelectedProductId] =
+    useState<string | null>(null);
+
+  // =========================================================
+  // FAVORITOS
+  // =========================================================
+
+  const [favoritado, setFavoritado] =
+    useState(false);
+
+  const [carregandoFavorito, setCarregandoFavorito] =
+    useState(false);
 
   // =========================================================
   // URL DAS IMAGENS
   // =========================================================
 
-  const getImageUrl = (imagePath?: string | null) => {
-    if (!imagePath) return null;
+  const getImageUrl = (
+    imagePath?: string | null
+  ) => {
+    if (!imagePath) {
+      return null;
+    }
 
     const path = String(imagePath).trim();
 
-    if (!path) return null;
+    if (!path) {
+      return null;
+    }
 
     if (
       path.startsWith("http://") ||
@@ -58,8 +87,10 @@ export default function ProductDetailScreen() {
     }
 
     const baseUrl =
-      api.defaults.baseURL?.replace(/\/api\/?$/, "") ||
-      "http://127.0.0.1:8000";
+      api.defaults.baseURL?.replace(
+        /\/api\/?$/,
+        ""
+      ) || "http://127.0.0.1:8000";
 
     const cleanPath = path
       .replace(/^\/+/, "")
@@ -72,16 +103,22 @@ export default function ProductDetailScreen() {
   // CONDIÇÃO DO PRODUTO
   // =========================================================
 
-  const getCondicaoTexto = (condicao?: string) => {
+  const getCondicaoTexto = (
+    condicao?: string
+  ) => {
     switch (condicao) {
       case "N":
         return "Novo";
+
       case "S":
         return "Seminovo";
+
       case "U":
         return "Usado";
+
       case "Q":
         return "Quebrado";
+
       default:
         return "Não informado";
     }
@@ -99,24 +136,32 @@ export default function ProductDetailScreen() {
     try {
       setLoading(true);
 
-      const response = await api.get(`/products/${id}`, {
-        headers: {
-          Accept: "application/json",
-        },
-      });
+      const response = await api.get(
+        `/products/${id}`,
+        {
+          headers: {
+            Accept: "application/json",
+          },
+        }
+      );
 
       const data = response.data;
 
       console.log(
-        "🔥 PRODUTO DETALHADO:",
+        "PRODUTO DETALHADO:",
         JSON.stringify(data, null, 2)
       );
 
       setProduct(data);
 
+      setActiveImageIndex(0);
+
       verificarFavorito(data);
     } catch (error) {
-      console.error("Erro ao buscar produto:", error);
+      console.error(
+        "Erro ao buscar produto:",
+        error
+      );
 
       Alert.alert(
         "Erro",
@@ -131,38 +176,58 @@ export default function ProductDetailScreen() {
   // VERIFICAR FAVORITO
   // =========================================================
 
-  const verificarFavorito = async (produtoAtual: any) => {
+  const verificarFavorito = async (
+    produtoAtual: any
+  ) => {
     try {
-      const token = await AsyncStorage.getItem("token");
+      const token =
+        await AsyncStorage.getItem("token");
 
-      if (!token || !produtoAtual?.id_produto) {
+      if (
+        !token ||
+        !produtoAtual?.id_produto
+      ) {
         return;
       }
 
-      const response = await api.get("/favoritos", {
-        headers: {
-          Accept: "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const response = await api.get(
+        "/favoritos",
+        {
+          headers: {
+            Accept: "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
 
       const data = response.data;
 
       const favoritos = Array.isArray(data)
         ? data
-        : data?.favoritos || data?.data || [];
+        : data?.favoritos ||
+          data?.data ||
+          [];
 
       const encontrado = favoritos.some(
         (item: any) =>
           Number(item.id_produto) ===
-            Number(produtoAtual.id_produto) ||
-          Number(item.produto?.id_produto) ===
-            Number(produtoAtual.id_produto)
+            Number(
+              produtoAtual.id_produto
+            ) ||
+          Number(
+            item.produto?.id_produto
+          ) ===
+            Number(
+              produtoAtual.id_produto
+            )
       );
 
       setFavoritado(encontrado);
     } catch (error) {
-      console.error("Erro ao verificar favorito:", error);
+      console.error(
+        "Erro ao verificar favorito:",
+        error
+      );
     }
   };
 
@@ -172,13 +237,15 @@ export default function ProductDetailScreen() {
 
   const handleFavorito = async () => {
     try {
-      const token = await AsyncStorage.getItem("token");
+      const token =
+        await AsyncStorage.getItem("token");
 
       if (!token) {
         Alert.alert(
           "Atenção",
           "Você precisa estar logado para favoritar um produto."
         );
+
         return;
       }
 
@@ -204,7 +271,9 @@ export default function ProductDetailScreen() {
         await api.post(
           "/favoritos",
           {
-            id_produto: Number(product.id_produto),
+            id_produto: Number(
+              product.id_produto
+            ),
           },
           {
             headers: {
@@ -217,7 +286,10 @@ export default function ProductDetailScreen() {
         setFavoritado(true);
       }
     } catch (error) {
-      console.error("Erro favorito:", error);
+      console.error(
+        "Erro favorito:",
+        error
+      );
 
       Alert.alert(
         "Erro",
@@ -232,166 +304,274 @@ export default function ProductDetailScreen() {
   // SOLICITAR TROCA
   // =========================================================
 
-  const handleSolicitarTroca = async () => {
-    try {
-      const token = await AsyncStorage.getItem("token");
+  const handleSolicitarTroca =
+    async () => {
+      try {
+        const token =
+          await AsyncStorage.getItem(
+            "token"
+          );
 
-      if (!token) {
-        Alert.alert(
-          "Atenção",
-          "Você precisa estar logado para solicitar uma troca."
-        );
-        return;
-      }
+        if (!token) {
+          Alert.alert(
+            "Atenção",
+            "Você precisa estar logado para solicitar uma troca."
+          );
 
-      if (!product?.id_produto) {
-        return;
-      }
-
-      setSolicitandoTroca(true);
-
-      const meusProdutosResponse = await api.get(
-        "/my-products",
-        {
-          headers: {
-            Accept: "application/json",
-            Authorization: `Bearer ${token}`,
-          },
+          return;
         }
-      );
 
-      const meusProdutosData = meusProdutosResponse.data;
+        if (!product?.id_produto) {
+          return;
+        }
 
-      console.log(
-        "🔥 6 - MEUS PRODUTOS:",
-        JSON.stringify(meusProdutosData, null, 2)
-      );
+        setSolicitandoTroca(true);
 
-      const produtos = Array.isArray(meusProdutosData)
-        ? meusProdutosData
-        : meusProdutosData?.products ||
-          meusProdutosData?.produtos ||
-          [];
+        const meusProdutosResponse =
+          await api.get(
+            "/my-products",
+            {
+              headers: {
+                Accept:
+                  "application/json",
 
-      const produtosDisponiveis = produtos.filter(
-        (item: any) =>
-          item.st_status === "A" &&
-          Number(item.id_produto) !==
-            Number(product.id_produto)
-      );
+                Authorization:
+                  `Bearer ${token}`,
+              },
+            }
+          );
 
-      if (produtosDisponiveis.length === 0) {
-        Alert.alert(
-          "Sem produtos disponíveis",
-          "Você não possui outros produtos disponíveis para oferecer em uma troca."
+        const meusProdutosData =
+          meusProdutosResponse.data;
+
+        console.log(
+          "MEUS PRODUTOS:",
+          JSON.stringify(
+            meusProdutosData,
+            null,
+            2
+          )
         );
 
-        return;
+        const produtos = Array.isArray(
+          meusProdutosData
+        )
+          ? meusProdutosData
+          : meusProdutosData?.products ||
+            meusProdutosData?.produtos ||
+            [];
+
+        const produtosDisponiveis =
+          produtos.filter(
+            (item: any) =>
+              item.st_status === "A" &&
+              Number(
+                item.id_produto
+              ) !==
+                Number(
+                  product.id_produto
+                )
+          );
+
+        if (
+          produtosDisponiveis.length ===
+          0
+        ) {
+          Alert.alert(
+            "Sem produtos disponíveis",
+            "Você não possui outros produtos disponíveis para oferecer em uma troca."
+          );
+
+          return;
+        }
+
+        setMeusProdutos(
+          produtosDisponiveis
+        );
+
+        setSelectedProductId(null);
+
+        setModalVisible(true);
+      } catch (error) {
+        console.error(
+          "Erro ao solicitar troca:",
+          error
+        );
+
+        Alert.alert(
+          "Erro",
+          "Não foi possível carregar seus produtos."
+        );
+      } finally {
+        setSolicitandoTroca(false);
       }
-
-      setMeusProdutos(produtosDisponiveis);
-      setSelectedProductId(null);
-      setModalVisible(true);
-    } catch (error) {
-      console.error("Erro ao solicitar troca:", error);
-
-      Alert.alert(
-        "Erro",
-        "Não foi possível carregar seus produtos."
-      );
-    } finally {
-      setSolicitandoTroca(false);
-    }
-  };
+    };
 
   // =========================================================
   // CONFIRMAR PROPOSTA
   // =========================================================
 
-  const handleConfirmarTroca = async () => {
-    try {
-      if (!selectedProductId) {
-        Alert.alert(
-          "Atenção",
-          "Selecione um produto para oferecer."
-        );
-        return;
-      }
+  const handleConfirmarTroca =
+    async () => {
+      try {
+        if (!selectedProductId) {
+          Alert.alert(
+            "Atenção",
+            "Selecione um produto para oferecer."
+          );
 
-      const token = await AsyncStorage.getItem("token");
-
-      if (!token) {
-        Alert.alert(
-          "Atenção",
-          "Você precisa estar logado para realizar uma troca."
-        );
-        return;
-      }
-
-      const response = await api.post(
-        "/propostas",
-        {
-          id_produto_desejado: Number(product.id_produto),
-          id_produto_oferecido: Number(selectedProductId),
-        },
-        {
-          headers: {
-            Accept: "application/json",
-            Authorization: `Bearer ${token}`,
-          },
+          return;
         }
-      );
 
-      const data = response.data;
+        const token =
+          await AsyncStorage.getItem(
+            "token"
+          );
 
-      console.log(
-        "🔥 RESPOSTA PROPOSTA:",
-        JSON.stringify(data, null, 2)
-      );
+        if (!token) {
+          Alert.alert(
+            "Atenção",
+            "Você precisa estar logado para realizar uma troca."
+          );
 
-      setModalVisible(false);
-      setSelectedProductId(null);
+          return;
+        }
 
-      Alert.alert(
-        "Sucesso",
-        "Sua proposta de troca foi enviada!"
-      );
+        const response =
+          await api.post(
+            "/propostas",
+            {
+              id_produto_desejado:
+                Number(
+                  product.id_produto
+                ),
 
-      router.push("/trocas" as any);
-    } catch (error: any) {
-      console.error("Erro ao confirmar troca:", error);
+              id_produto_oferecido:
+                Number(
+                  selectedProductId
+                ),
+            },
+            {
+              headers: {
+                Accept:
+                  "application/json",
 
-      Alert.alert(
-        "Erro",
-        error?.response?.data?.message ||
-          error?.message ||
-          "Não foi possível enviar a proposta de troca."
-      );
-    }
-  };
+                Authorization:
+                  `Bearer ${token}`,
+              },
+            }
+          );
+
+        const data = response.data;
+
+        console.log(
+          "RESPOSTA PROPOSTA:",
+          JSON.stringify(
+            data,
+            null,
+            2
+          )
+        );
+
+        setModalVisible(false);
+
+        setSelectedProductId(null);
+
+        Alert.alert(
+          "Sucesso",
+          "Sua proposta de troca foi enviada!"
+        );
+
+        router.push(
+          "/trocas" as any
+        );
+      } catch (error: any) {
+        console.error(
+          "Erro ao confirmar troca:",
+          error
+        );
+
+        Alert.alert(
+          "Erro",
+          error?.response?.data
+            ?.message ||
+            error?.message ||
+            "Não foi possível enviar a proposta de troca."
+        );
+      }
+    };
 
   // =========================================================
   // VISUALIZAR PERFIL DO VENDEDOR
   // =========================================================
 
-  const handleVisualizarPerfil = () => {
-    const idUsuario =
-      product?.user?.id_usuario ??
-      product?.user?.id ??
-      product?.id_usuario ??
-      product?.user_id;
+  const handleVisualizarPerfil =
+    () => {
+      const idUsuario =
+        product?.user?.id_usuario ??
+        product?.user?.id ??
+        product?.id_usuario ??
+        product?.user_id;
 
-    if (!idUsuario) {
-      Alert.alert(
-        "Erro",
-        "Não foi possível identificar o usuário."
+      if (!idUsuario) {
+        Alert.alert(
+          "Erro",
+          "Não foi possível identificar o usuário."
+        );
+
+        return;
+      }
+
+      router.push(
+        `/visualizarperfil?id=${idUsuario}` as any
       );
+    };
+
+  // =========================================================
+  // IMAGEM ANTERIOR
+  // =========================================================
+
+  const imagemAnterior = () => {
+    if (activeImageIndex <= 0) {
       return;
     }
 
-    router.push(
-      `/visualizarperfil?id=${idUsuario}` as any
-    );
+    const novoIndex =
+      activeImageIndex - 1;
+
+    imageListRef.current?.scrollToIndex({
+      index: novoIndex,
+      animated: true,
+    });
+
+    setActiveImageIndex(novoIndex);
+  };
+
+  // =========================================================
+  // PRÓXIMA IMAGEM
+  // =========================================================
+
+  const proximaImagem = () => {
+const images = Array.isArray(product.images)
+  ? product.images
+  : [];
+
+    if (
+      activeImageIndex >=
+      images.length - 1
+    ) {
+      return;
+    }
+
+    const novoIndex =
+      activeImageIndex + 1;
+
+    imageListRef.current?.scrollToIndex({
+      index: novoIndex,
+      animated: true,
+    });
+
+    setActiveImageIndex(novoIndex);
   };
 
   // =========================================================
@@ -400,13 +580,19 @@ export default function ProductDetailScreen() {
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
+      <View
+        style={
+          styles.loadingContainer
+        }
+      >
         <ActivityIndicator
           size="large"
           color="#0099FF"
         />
 
-        <Text style={styles.loadingText}>
+        <Text
+          style={styles.loadingText}
+        >
           Carregando produto...
         </Text>
       </View>
@@ -419,27 +605,40 @@ export default function ProductDetailScreen() {
 
   if (!product) {
     return (
-      <View style={styles.loadingContainer}>
+      <View
+        style={
+          styles.loadingContainer
+        }
+      >
         <Feather
           name="package"
           size={50}
           color="#CCCCCC"
         />
 
-        <Text style={styles.loadingText}>
+        <Text
+          style={styles.loadingText}
+        >
           Produto não encontrado.
         </Text>
       </View>
     );
   }
 
-  const images = product.images || [];
+  // =========================================================
+  // DADOS
+  // =========================================================
+
+  const images =
+    product.images || [];
 
   const fotoPerfil =
-    product?.user?.ds_foto_perfil ||
+    product?.user
+      ?.ds_foto_perfil ||
     product?.user?.ds_foto;
 
-  const fotoPerfilUrl = getImageUrl(fotoPerfil);
+  const fotoPerfilUrl =
+    getImageUrl(fotoPerfil);
 
   // =========================================================
   // TELA
@@ -448,13 +647,25 @@ export default function ProductDetailScreen() {
   return (
     <View style={styles.container}>
       <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={
+          false
+        }
+        contentContainerStyle={
+          styles.scrollContent
+        }
       >
+        {/* ================================================= */}
+        {/* CABEÇALHO */}
+        {/* ================================================= */}
+
         <View style={styles.header}>
           <TouchableOpacity
-            style={styles.headerButton}
-            onPress={() => router.back()}
+            style={
+              styles.headerButton
+            }
+            onPress={() =>
+              router.back()
+            }
           >
             <Feather
               name="arrow-left"
@@ -463,14 +674,24 @@ export default function ProductDetailScreen() {
             />
           </TouchableOpacity>
 
-          <Text style={styles.headerTitle}>
+          <Text
+            style={
+              styles.headerTitle
+            }
+          >
             Detalhes do anúncio
           </Text>
 
           <TouchableOpacity
-            style={styles.headerButton}
-            onPress={handleFavorito}
-            disabled={carregandoFavorito}
+            style={
+              styles.headerButton
+            }
+            onPress={
+              handleFavorito
+            }
+            disabled={
+              carregandoFavorito
+            }
           >
             {carregandoFavorito ? (
               <ActivityIndicator
@@ -495,45 +716,79 @@ export default function ProductDetailScreen() {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.imageSection}>
+        {/* ================================================= */}
+        {/* IMAGENS DO PRODUTO */}
+        {/* ================================================= */}
+
+        <View
+          style={styles.imageSection}
+        >
           {images.length > 0 ? (
             <>
               <FlatList
+                ref={imageListRef}
                 data={images}
                 horizontal
                 pagingEnabled
-                showsHorizontalScrollIndicator={false}
+                showsHorizontalScrollIndicator={
+                  false
+                }
                 keyExtractor={(
                   item: any,
                   index
                 ) =>
                   String(
                     item.id_imagem_produto ??
+                      item.id_imagem ??
                       item.id ??
                       index
                   )
                 }
-                onMomentumScrollEnd={(event) => {
-                  const index = Math.round(
-                    event.nativeEvent.contentOffset.x /
-                      width
-                  );
+                getItemLayout={(
+                  _,
+                  index
+                ) => ({
+                  length: width,
+                  offset:
+                    width * index,
+                  index,
+                })}
+                onMomentumScrollEnd={(
+                  event
+                ) => {
+                  const index =
+                    Math.round(
+                      event.nativeEvent
+                        .contentOffset.x /
+                        width
+                    );
 
-                  setActiveImageIndex(index);
-                }}
-                renderItem={({ item }) => {
-                  const imagemUrl = getImageUrl(
-                    item.ds_imagem
+                  setActiveImageIndex(
+                    index
                   );
+                }}
+                renderItem={({
+                  item,
+                }) => {
+                  const imagemUrl =
+                    getImageUrl(
+                      item.ds_imagem
+                    );
 
                   return (
-                    <View style={styles.imageWrapper}>
+                    <View
+                      style={
+                        styles.imageWrapper
+                      }
+                    >
                       {imagemUrl ? (
                         <Image
                           source={{
                             uri: imagemUrl,
                           }}
-                          style={styles.productImage}
+                          style={
+                            styles.productImage
+                          }
                           resizeMode="contain"
                         />
                       ) : (
@@ -548,14 +803,109 @@ export default function ProductDetailScreen() {
                 }}
               />
 
+              {/* =========================================== */}
+              {/* SETA ESQUERDA */}
+              {/* =========================================== */}
+
+              {images.length > 1 &&
+                activeImageIndex >
+                  0 && (
+                  <TouchableOpacity
+                    style={[
+                      styles.imageArrow,
+                      styles.imageArrowLeft,
+                    ]}
+                    onPress={
+                      imagemAnterior
+                    }
+                    activeOpacity={
+                      0.8
+                    }
+                  >
+                    <Feather
+                      name="chevron-left"
+                      size={28}
+                      color="#FFFFFF"
+                    />
+                  </TouchableOpacity>
+                )}
+
+              {/* =========================================== */}
+              {/* SETA DIREITA */}
+              {/* =========================================== */}
+
+              {images.length > 1 &&
+                activeImageIndex <
+                  images.length -
+                    1 && (
+                  <TouchableOpacity
+                    style={[
+                      styles.imageArrow,
+                      styles.imageArrowRight,
+                    ]}
+                    onPress={
+                      proximaImagem
+                    }
+                    activeOpacity={
+                      0.8
+                    }
+                  >
+                    <Feather
+                      name="chevron-right"
+                      size={28}
+                      color="#FFFFFF"
+                    />
+                  </TouchableOpacity>
+                )}
+
+              {/* =========================================== */}
+              {/* CONTADOR DAS FOTOS */}
+              {/* =========================================== */}
+
               {images.length > 1 && (
-                <View style={styles.pagination}>
+                <View
+                  style={
+                    styles.imageCounter
+                  }
+                >
+                  <Feather
+                    name="image"
+                    size={13}
+                    color="#FFFFFF"
+                  />
+
+                  <Text
+                    style={
+                      styles.imageCounterText
+                    }
+                  >
+                    {activeImageIndex +
+                      1}{" "}
+                    / {images.length}
+                  </Text>
+                </View>
+              )}
+
+              {/* =========================================== */}
+              {/* BOLINHAS */}
+              {/* =========================================== */}
+
+              {images.length > 1 && (
+                <View
+                  style={
+                    styles.pagination
+                  }
+                >
                   {images.map(
-                    (_: any, index: number) => (
+                    (
+                      _: any,
+                      index: number
+                    ) => (
                       <View
                         key={index}
                         style={[
                           styles.paginationDot,
+
                           index ===
                             activeImageIndex &&
                             styles.paginationDotActive,
@@ -567,42 +917,82 @@ export default function ProductDetailScreen() {
               )}
             </>
           ) : (
-            <View style={styles.noImageContainer}>
+            <View
+              style={
+                styles.noImageContainer
+              }
+            >
               <Feather
                 name="package"
                 size={60}
                 color="#CCCCCC"
               />
 
-              <Text style={styles.noImageText}>
+              <Text
+                style={
+                  styles.noImageText
+                }
+              >
                 Sem imagem
               </Text>
             </View>
           )}
         </View>
 
-        <View style={styles.productInfo}>
-          <Text style={styles.productTitle}>
+        {/* ================================================= */}
+        {/* INFORMAÇÕES DO PRODUTO */}
+        {/* ================================================= */}
+
+        <View
+          style={styles.productInfo}
+        >
+          <Text
+            style={
+              styles.productTitle
+            }
+          >
             {product.nm_produto}
           </Text>
 
-          {product.categoria?.nm_categoria && (
-            <View style={styles.categoryBadge}>
-              <Text style={styles.categoryText}>
-                {product.categoria.nm_categoria}
+          {product.categoria
+            ?.nm_categoria && (
+            <View
+              style={
+                styles.categoryBadge
+              }
+            >
+              <Text
+                style={
+                  styles.categoryText
+                }
+              >
+                {
+                  product.categoria
+                    .nm_categoria
+                }
               </Text>
             </View>
           )}
 
-          <View style={styles.infoRow}>
-            <View style={styles.infoItem}>
+          <View
+            style={styles.infoRow}
+          >
+            <View
+              style={
+                styles.infoItem
+              }
+            >
               <Feather
                 name="check-circle"
                 size={17}
                 color="#0099FF"
               />
 
-              <Text style={styles.infoText}>
+              <Text
+                style={
+                  styles.infoText
+                }
+              >
                 {getCondicaoTexto(
                   product.st_condicao
                 )}
@@ -612,35 +1002,67 @@ export default function ProductDetailScreen() {
 
           {product.ds_produto && (
             <>
-              <Text style={styles.sectionTitle}>
+              <Text
+                style={
+                  styles.sectionTitle
+                }
+              >
                 Descrição
               </Text>
 
-              <Text style={styles.description}>
-                {product.ds_produto}
+              <Text
+                style={
+                  styles.description
+                }
+              >
+                {
+                  product.ds_produto
+                }
               </Text>
             </>
           )}
         </View>
 
+        {/* ================================================= */}
+        {/* ANUNCIANTE */}
+        {/* ================================================= */}
+
         {product.user && (
-          <View style={styles.sellerSection}>
-            <Text style={styles.sectionTitle}>
+          <View
+            style={
+              styles.sellerSection
+            }
+          >
+            <Text
+              style={
+                styles.sectionTitle
+              }
+            >
               Anunciante
             </Text>
 
             <TouchableOpacity
-              style={styles.sellerCard}
+              style={
+                styles.sellerCard
+              }
               activeOpacity={0.7}
-              onPress={handleVisualizarPerfil}
+              onPress={
+                handleVisualizarPerfil
+              }
             >
-              <View style={styles.sellerImageContainer}>
+              <View
+                style={
+                  styles.sellerImageContainer
+                }
+              >
                 {fotoPerfilUrl ? (
                   <Image
                     source={{
                       uri: fotoPerfilUrl,
                     }}
-                    style={styles.userProfileImage}
+                    style={
+                      styles.userProfileImage
+                    }
                     resizeMode="cover"
                   />
                 ) : (
@@ -652,12 +1074,27 @@ export default function ProductDetailScreen() {
                 )}
               </View>
 
-              <View style={styles.sellerInfo}>
-                <Text style={styles.sellerName}>
-                  {product.user.nm_usuario}
+              <View
+                style={
+                  styles.sellerInfo
+                }
+              >
+                <Text
+                  style={
+                    styles.sellerName
+                  }
+                >
+                  {
+                    product.user
+                      .nm_usuario
+                  }
                 </Text>
 
-                <Text style={styles.sellerAction}>
+                <Text
+                  style={
+                    styles.sellerAction
+                  }
+                >
                   Visualizar perfil
                 </Text>
               </View>
@@ -671,12 +1108,26 @@ export default function ProductDetailScreen() {
           </View>
         )}
 
-        <View style={styles.exchangeSection}>
+        {/* ================================================= */}
+        {/* SOLICITAR TROCA */}
+        {/* ================================================= */}
+
+        <View
+          style={
+            styles.exchangeSection
+          }
+        >
           <TouchableOpacity
-            style={styles.exchangeButton}
+            style={
+              styles.exchangeButton
+            }
             activeOpacity={0.8}
-            onPress={handleSolicitarTroca}
-            disabled={solicitandoTroca}
+            onPress={
+              handleSolicitarTroca
+            }
+            disabled={
+              solicitandoTroca
+            }
           >
             {solicitandoTroca ? (
               <ActivityIndicator
@@ -691,7 +1142,11 @@ export default function ProductDetailScreen() {
                   color="#FFFFFF"
                 />
 
-                <Text style={styles.exchangeButtonText}>
+                <Text
+                  style={
+                    styles.exchangeButtonText
+                  }
+                >
                   Solicitar troca
                 </Text>
               </>
@@ -699,6 +1154,10 @@ export default function ProductDetailScreen() {
           </TouchableOpacity>
         </View>
       </ScrollView>
+
+      {/* =================================================== */}
+      {/* MODAL SOLICITAR TROCA */}
+      {/* =================================================== */}
 
       <Modal
         animationType="slide"
@@ -708,22 +1167,40 @@ export default function ProductDetailScreen() {
           setModalVisible(false)
         }
       >
-        <View style={styles.modalOverlay}>
+        <View
+          style={styles.modalOverlay}
+        >
           <TouchableOpacity
-            style={styles.modalBackdropTouch}
+            style={
+              styles.modalBackdropTouch
+            }
             activeOpacity={1}
             onPress={() =>
               setModalVisible(false)
             }
           />
 
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
+          <View
+            style={
+              styles.modalContent
+            }
+          >
+            {/* CABEÇALHO MODAL */}
+
+            <View
+              style={
+                styles.modalHeader
+              }
+            >
               <TouchableOpacity
                 onPress={() =>
-                  setModalVisible(false)
+                  setModalVisible(
+                    false
+                  )
                 }
-                style={styles.modalBackButton}
+                style={
+                  styles.modalBackButton
+                }
               >
                 <Feather
                   name="arrow-left"
@@ -733,25 +1210,39 @@ export default function ProductDetailScreen() {
               </TouchableOpacity>
 
               <Text
-                style={styles.modalHeaderTitle}
+                style={
+                  styles.modalHeaderTitle
+                }
               >
                 Solicitar Troca
               </Text>
 
-              <View style={styles.modalHeaderSpacer} />
+              <View
+                style={
+                  styles.modalHeaderSpacer
+                }
+              />
             </View>
+
+            {/* LISTA */}
 
             <FlatList
               data={meusProdutos}
               keyExtractor={(item) =>
-                String(item.id_produto)
+                String(
+                  item.id_produto
+                )
               }
-              showsVerticalScrollIndicator={false}
+              showsVerticalScrollIndicator={
+                false
+              }
               contentContainerStyle={
                 styles.modalListContent
               }
               ListHeaderComponent={
                 <View>
+                  {/* PRODUTO DESEJADO */}
+
                   <View
                     style={
                       styles.targetProductCard
@@ -764,7 +1255,8 @@ export default function ProductDetailScreen() {
                     >
                       {(() => {
                         const imagemProduto =
-                          product?.images?.[0]
+                          product
+                            ?.images?.[0]
                             ?.ds_imagem;
 
                         const imagemUrl =
@@ -772,7 +1264,9 @@ export default function ProductDetailScreen() {
                             imagemProduto
                           );
 
-                        if (imagemUrl) {
+                        if (
+                          imagemUrl
+                        ) {
                           return (
                             <Image
                               source={{
@@ -797,7 +1291,9 @@ export default function ProductDetailScreen() {
                     </View>
 
                     <View
-                      style={styles.targetInfo}
+                      style={
+                        styles.targetInfo
+                      }
                     >
                       <Text
                         style={
@@ -811,9 +1307,13 @@ export default function ProductDetailScreen() {
                         style={
                           styles.targetTitle
                         }
-                        numberOfLines={1}
+                        numberOfLines={
+                          1
+                        }
                       >
-                        {product.nm_produto}
+                        {
+                          product.nm_produto
+                        }
                       </Text>
 
                       <Text
@@ -829,7 +1329,9 @@ export default function ProductDetailScreen() {
                   </View>
 
                   <View
-                    style={styles.modalDivider}
+                    style={
+                      styles.modalDivider
+                    }
                   />
 
                   <Text
@@ -837,29 +1339,38 @@ export default function ProductDetailScreen() {
                       styles.modalSectionTitle
                     }
                   >
-                    Selecione o item que você vai
-                    oferecer:
+                    Selecione o item que
+                    você vai oferecer:
                   </Text>
                 </View>
               }
-              renderItem={({ item }) => {
+              renderItem={({
+                item,
+              }) => {
                 const isSelected =
                   selectedProductId ===
-                  String(item.id_produto);
+                  String(
+                    item.id_produto
+                  );
 
                 const imagemProduto =
-                  item.images?.[0]?.ds_imagem ||
-                  item.imagens?.[0]?.ds_imagem ||
+                  item.images?.[0]
+                    ?.ds_imagem ||
+                  item.imagens?.[0]
+                    ?.ds_imagem ||
                   item.ds_imagem ||
                   item.imagem;
 
                 const imagemUrl =
-                  getImageUrl(imagemProduto);
+                  getImageUrl(
+                    imagemProduto
+                  );
 
                 return (
                   <TouchableOpacity
                     style={[
                       styles.myProductCard,
+
                       isSelected &&
                         styles.myProductCardSelected,
                     ]}
@@ -897,15 +1408,21 @@ export default function ProductDetailScreen() {
                     </View>
 
                     <View
-                      style={styles.myProductInfo}
+                      style={
+                        styles.myProductInfo
+                      }
                     >
                       <Text
                         style={
                           styles.myProductTitle
                         }
-                        numberOfLines={1}
+                        numberOfLines={
+                          1
+                        }
                       >
-                        {item.nm_produto}
+                        {
+                          item.nm_produto
+                        }
                       </Text>
 
                       <Text
@@ -922,6 +1439,7 @@ export default function ProductDetailScreen() {
                     <View
                       style={[
                         styles.checkbox,
+
                         isSelected &&
                           styles.checkboxSelected,
                       ]}
@@ -939,6 +1457,8 @@ export default function ProductDetailScreen() {
               }}
             />
 
+            {/* BOTÃO CONFIRMAR */}
+
             <View
               style={
                 styles.modalFooterContainer
@@ -947,12 +1467,17 @@ export default function ProductDetailScreen() {
               <TouchableOpacity
                 style={[
                   styles.confirmButton,
+
                   !selectedProductId &&
                     styles.confirmButtonDisabled,
                 ]}
                 activeOpacity={0.8}
-                disabled={!selectedProductId}
-                onPress={handleConfirmarTroca}
+                disabled={
+                  !selectedProductId
+                }
+                onPress={
+                  handleConfirmarTroca
+                }
               >
                 <Text
                   style={
@@ -979,49 +1504,73 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#FFFFFF",
   },
+
   scrollContent: {
     paddingBottom: 30,
   },
+
+  // ===========================================================
+  // LOADING
+  // ===========================================================
+
   loadingContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "#FFFFFF",
   },
+
   loadingText: {
     marginTop: 12,
-    fontFamily: "Montserrat_400Regular",
+    fontFamily:
+      "Montserrat_400Regular",
     fontSize: 14,
     color: "#777777",
   },
+
+  // ===========================================================
+  // HEADER
+  // ===========================================================
+
   header: {
     height: 62,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    justifyContent:
+      "space-between",
     paddingHorizontal: 16,
     backgroundColor: "#FFFFFF",
     borderBottomWidth: 1,
     borderBottomColor: "#EEEEEE",
   },
+
   headerButton: {
     width: 40,
     height: 40,
     justifyContent: "center",
     alignItems: "center",
   },
+
   headerTitle: {
     flex: 1,
     textAlign: "center",
-    fontFamily: "Montserrat_700Bold",
+    fontFamily:
+      "Montserrat_700Bold",
     fontSize: 16,
     color: "#005386",
   },
+
+  // ===========================================================
+  // IMAGENS
+  // ===========================================================
+
   imageSection: {
     width: "100%",
     height: width * 0.82,
     backgroundColor: "#F8F8F8",
+    position: "relative",
   },
+
   imageWrapper: {
     width: width,
     height: width * 0.82,
@@ -1029,327 +1578,607 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "#F8F8F8",
   },
+
   productImage: {
     width: "100%",
     height: "100%",
   },
+
+  // SETAS DO SLIDE
+
+  imageArrow: {
+    position: "absolute",
+    top: "50%",
+    marginTop: -22,
+
+    width: 44,
+    height: 44,
+
+    borderRadius: 22,
+
+    backgroundColor:
+      "rgba(0, 0, 0, 0.45)",
+
+    justifyContent: "center",
+    alignItems: "center",
+
+    zIndex: 10,
+  },
+
+  imageArrowLeft: {
+    left: 12,
+  },
+
+  imageArrowRight: {
+    right: 12,
+  },
+
+  // CONTADOR 1 / 5
+
+  imageCounter: {
+    position: "absolute",
+    top: 12,
+    right: 12,
+
+    flexDirection: "row",
+    alignItems: "center",
+
+    gap: 5,
+
+    backgroundColor:
+      "rgba(0, 0, 0, 0.55)",
+
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+
+    borderRadius: 15,
+
+    zIndex: 10,
+  },
+
+  imageCounterText: {
+    fontFamily:
+      "Montserrat_600SemiBold",
+    fontSize: 12,
+    color: "#FFFFFF",
+  },
+
+  // SEM IMAGEM
+
   noImageContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
   },
+
   noImageText: {
     marginTop: 8,
-    fontFamily: "Montserrat_400Regular",
+    fontFamily:
+      "Montserrat_400Regular",
     fontSize: 13,
     color: "#999999",
   },
+
+  // BOLINHAS DO SLIDE
+
   pagination: {
     position: "absolute",
     bottom: 12,
     left: 0,
     right: 0,
+
     flexDirection: "row",
+
     justifyContent: "center",
     alignItems: "center",
+
+    zIndex: 10,
   },
+
   paginationDot: {
     width: 7,
     height: 7,
+
     borderRadius: 4,
+
     backgroundColor: "#CCCCCC",
+
     marginHorizontal: 3,
   },
+
   paginationDotActive: {
     width: 20,
+
     backgroundColor: "#0099FF",
   },
+
+  // ===========================================================
+  // PRODUTO
+  // ===========================================================
+
   productInfo: {
     paddingHorizontal: 20,
     paddingTop: 20,
   },
+
   productTitle: {
-    fontFamily: "Montserrat_700Bold",
+    fontFamily:
+      "Montserrat_700Bold",
     fontSize: 22,
     color: "#005386",
     marginBottom: 10,
   },
+
   categoryBadge: {
     alignSelf: "flex-start",
+
     backgroundColor: "#E4F8FF",
+
     borderRadius: 20,
+
     paddingHorizontal: 12,
     paddingVertical: 6,
+
     marginBottom: 12,
   },
+
   categoryText: {
-    fontFamily: "Montserrat_600SemiBold",
+    fontFamily:
+      "Montserrat_600SemiBold",
     fontSize: 11,
     color: "#0099FF",
   },
+
   infoRow: {
     flexDirection: "row",
     alignItems: "center",
     marginBottom: 20,
   },
+
   infoItem: {
     flexDirection: "row",
     alignItems: "center",
   },
+
   infoText: {
     marginLeft: 7,
-    fontFamily: "Montserrat_500Medium",
+
+    fontFamily:
+      "Montserrat_500Medium",
+
     fontSize: 13,
+
     color: "#555555",
   },
+
   sectionTitle: {
-    fontFamily: "Montserrat_700Bold",
+    fontFamily:
+      "Montserrat_700Bold",
+
     fontSize: 16,
+
     color: "#005386",
+
     marginBottom: 10,
   },
+
   description: {
-    fontFamily: "Montserrat_400Regular",
+    fontFamily:
+      "Montserrat_400Regular",
+
     fontSize: 14,
+
     lineHeight: 22,
+
     color: "#555555",
   },
+
+  // ===========================================================
+  // ANUNCIANTE
+  // ===========================================================
+
   sellerSection: {
     paddingHorizontal: 20,
     marginTop: 25,
   },
+
   sellerCard: {
     flexDirection: "row",
     alignItems: "center",
+
     backgroundColor: "#F8FCFF",
+
     borderWidth: 1,
     borderColor: "#E1F3FF",
+
     borderRadius: 12,
+
     padding: 12,
   },
+
   sellerImageContainer: {
     width: 48,
     height: 48,
+
     borderRadius: 24,
+
     backgroundColor: "#E4F8FF",
+
     justifyContent: "center",
     alignItems: "center",
+
     overflow: "hidden",
   },
+
   userProfileImage: {
     width: "100%",
     height: "100%",
   },
+
   sellerInfo: {
     flex: 1,
     marginLeft: 12,
   },
+
   sellerName: {
-    fontFamily: "Montserrat_700Bold",
+    fontFamily:
+      "Montserrat_700Bold",
+
     fontSize: 14,
+
     color: "#005386",
   },
+
   sellerAction: {
     marginTop: 3,
-    fontFamily: "Montserrat_400Regular",
+
+    fontFamily:
+      "Montserrat_400Regular",
+
     fontSize: 11,
+
     color: "#0099FF",
   },
+
+  // ===========================================================
+  // SOLICITAR TROCA
+  // ===========================================================
+
   exchangeSection: {
     paddingHorizontal: 20,
     marginTop: 25,
   },
+
   exchangeButton: {
     height: 52,
+
     borderRadius: 10,
+
     backgroundColor: "#0099FF",
+
     flexDirection: "row",
+
     justifyContent: "center",
     alignItems: "center",
   },
+
   exchangeButtonText: {
     marginLeft: 8,
-    fontFamily: "Montserrat_700Bold",
+
+    fontFamily:
+      "Montserrat_700Bold",
+
     fontSize: 15,
+
     color: "#FFFFFF",
   },
+
+  // ===========================================================
+  // MODAL
+  // ===========================================================
+
   modalOverlay: {
     flex: 1,
     justifyContent: "flex-end",
   },
+
   modalBackdropTouch: {
     position: "absolute",
+
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: "rgba(0,0,0,0.35)",
+
+    backgroundColor:
+      "rgba(0,0,0,0.35)",
   },
+
   modalContent: {
     width: "100%",
+
     maxHeight: "88%",
+
     backgroundColor: "#FFFFFF",
+
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
+
     overflow: "hidden",
   },
+
   modalHeader: {
     height: 58,
+
     flexDirection: "row",
+
     alignItems: "center",
-    justifyContent: "space-between",
+
+    justifyContent:
+      "space-between",
+
     paddingHorizontal: 16,
+
     borderBottomWidth: 1,
+
     borderBottomColor: "#EEEEEE",
   },
+
   modalBackButton: {
     width: 30,
     height: 30,
+
     justifyContent: "center",
     alignItems: "center",
   },
+
   modalHeaderTitle: {
-    fontFamily: "Montserrat_700Bold",
+    fontFamily:
+      "Montserrat_700Bold",
+
     fontSize: 16,
+
     color: "#005386",
   },
+
   modalHeaderSpacer: {
     width: 30,
   },
+
   modalListContent: {
     padding: 20,
     paddingBottom: 20,
   },
+
+  // ===========================================================
+  // PRODUTO DESEJADO
+  // ===========================================================
+
   targetProductCard: {
     flexDirection: "row",
+
     backgroundColor: "#E4F8FF",
+
     borderRadius: 10,
+
     padding: 10,
+
     alignItems: "center",
+
     borderWidth: 1,
+
     borderColor: "#0099FF",
   },
+
   targetImageContainer: {
     width: 50,
     height: 50,
+
     borderRadius: 8,
+
     backgroundColor: "#FFFFFF",
+
     justifyContent: "center",
     alignItems: "center",
+
     overflow: "hidden",
   },
+
   targetProductImage: {
     width: "100%",
     height: "100%",
+
     borderRadius: 6,
   },
+
   targetInfo: {
     marginLeft: 10,
     flex: 1,
   },
+
   targetLabel: {
-    fontFamily: "Montserrat_400Regular",
+    fontFamily:
+      "Montserrat_400Regular",
+
     fontSize: 11,
+
     color: "#005386",
+
     marginBottom: 2,
   },
+
   targetTitle: {
-    fontFamily: "Montserrat_700Bold",
+    fontFamily:
+      "Montserrat_700Bold",
+
     fontSize: 13,
+
     color: "#005386",
   },
+
   targetCondition: {
     marginTop: 3,
-    fontFamily: "Montserrat_400Regular",
+
+    fontFamily:
+      "Montserrat_400Regular",
+
     fontSize: 11,
+
     color: "#0099FF",
   },
+
   modalDivider: {
     height: 1,
+
     backgroundColor: "#EEEEEE",
+
     marginVertical: 14,
   },
+
   modalSectionTitle: {
     fontSize: 14,
-    fontFamily: "Montserrat_600SemiBold",
+
+    fontFamily:
+      "Montserrat_600SemiBold",
+
     color: "#005386",
+
     marginBottom: 10,
   },
+
+  // ===========================================================
+  // MEUS PRODUTOS
+  // ===========================================================
+
   myProductCard: {
     flexDirection: "row",
+
     alignItems: "center",
+
     backgroundColor: "#FFFFFF",
+
     borderRadius: 10,
+
     padding: 12,
+
     borderWidth: 1,
+
     borderColor: "#EEEEEE",
+
     marginBottom: 8,
   },
+
   myProductCardSelected: {
     borderColor: "#0099FF",
+
     backgroundColor: "#E4F8FF",
   },
+
   myProductImageContainer: {
     width: 50,
     height: 50,
+
     borderRadius: 8,
+
     backgroundColor: "#F0F0F0",
+
     justifyContent: "center",
     alignItems: "center",
+
     overflow: "hidden",
   },
+
   myProductImage: {
     width: "100%",
     height: "100%",
+
     borderRadius: 8,
   },
+
   myProductInfo: {
     marginLeft: 10,
     flex: 1,
   },
+
   myProductTitle: {
-    fontFamily: "Montserrat_600SemiBold",
+    fontFamily:
+      "Montserrat_600SemiBold",
+
     fontSize: 13,
+
     color: "#333333",
   },
+
   myProductCondition: {
     marginTop: 4,
-    fontFamily: "Montserrat_400Regular",
+
+    fontFamily:
+      "Montserrat_400Regular",
+
     fontSize: 11,
+
     color: "#777777",
   },
+
+  // ===========================================================
+  // CHECKBOX
+  // ===========================================================
+
   checkbox: {
     width: 20,
     height: 20,
+
     borderRadius: 4,
+
     borderWidth: 1.5,
+
     borderColor: "#CCCCCC",
+
     justifyContent: "center",
     alignItems: "center",
   },
+
   checkboxSelected: {
     backgroundColor: "#0099FF",
+
     borderColor: "#0099FF",
   },
+
+  // ===========================================================
+  // RODAPÉ DO MODAL
+  // ===========================================================
+
   modalFooterContainer: {
     padding: 16,
+
     borderTopWidth: 1,
+
     borderTopColor: "#EEEEEE",
+
     backgroundColor: "#FFFFFF",
   },
+
   confirmButton: {
     backgroundColor: "#0099FF",
+
     height: 48,
+
     borderRadius: 10,
+
     justifyContent: "center",
     alignItems: "center",
   },
+
   confirmButtonDisabled: {
     backgroundColor: "#B3E5FF",
   },
+
   confirmButtonText: {
-    fontFamily: "Montserrat_700Bold",
+    fontFamily:
+      "Montserrat_700Bold",
+
     fontSize: 14,
+
     color: "#FFFFFF",
   },
 });

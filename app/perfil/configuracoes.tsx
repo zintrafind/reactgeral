@@ -317,11 +317,15 @@ export default function Configuracoes() {
           />
         </TouchableOpacity>
 
-        {/* ALTERAR SENHA */}
+        {/* editar Dados Pessoais */}
 
         <TouchableOpacity
           style={styles.menuItem}
-          activeOpacity={0.7}
+          onPress={() =>
+            router.push(
+              "/perfil/editarDadosPessoais" as any
+            )
+          }
         >
           <MaterialIcons
             name="lock-outline"
@@ -330,7 +334,7 @@ export default function Configuracoes() {
           />
 
           <Text style={styles.menuText}>
-            Alterar Senha
+            Editar Dados Pessoais
           </Text>
 
           <AntDesign
@@ -397,11 +401,11 @@ export default function Configuracoes() {
           }
           activeOpacity={0.7}
         >
-          <AntDesign
-            name="star"
-            size={22}
-            color="#005386"
-          />
+          <MaterialIcons
+         name="star-outline"
+         size={24}
+         color="#005386"
+/>
 
           <Text style={styles.menuText}>
             Peças Favoritas

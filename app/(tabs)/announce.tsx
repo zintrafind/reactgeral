@@ -3,12 +3,15 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import api from "../../services/api.js";
 import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 
 import {
   ActivityIndicator,
+  Dimensions,
   Image,
   Modal,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   ScrollView,
   StyleSheet,
   Text,
@@ -17,17 +20,47 @@ import {
   View,
 } from "react-native";
 
+const LIMITE_IMAGENS = 5;
+
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
+
 export default function AnnounceScreen() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const [successModalVisible, setSuccessModalVisible] = useState(false);
-  const [errorModalVisible, setErrorModalVisible] = useState(false);
+  const [successModalVisible, setSuccessModalVisible] =
+    useState(false);
+
+  const [errorModalVisible, setErrorModalVisible] =
+    useState(false);
+
   const [errorMessage, setErrorMessage] = useState("");
 
-  const [categoryModalVisible, setCategoryModalVisible] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState("");
+  const [categoryModalVisible, setCategoryModalVisible] =
+    useState(false);
+
+  const [selectedCategory, setSelectedCategory] =
+    useState("");
+
+  const [conditionModalVisible, setConditionModalVisible] =
+    useState(false);
+
+  const [selectedCondition, setSelectedCondition] =
+    useState("");
+
+  // ============================================================
+  // IMAGENS
+  // ============================================================
+
+  const [images, setImages] = useState<any[]>([]);
+  const [imagemAtual, setImagemAtual] = useState(0);
+
+  const carouselRef = useRef<ScrollView>(null);
+
+  // ============================================================
+  // CATEGORIAS
+  // ============================================================
 
   const categories = [
     { id: 1, nome: "Hardware" },
@@ -41,8 +74,9 @@ export default function AnnounceScreen() {
     { id: 9, nome: "Outros" },
   ];
 
-  const [conditionModalVisible, setConditionModalVisible] = useState(false);
-  const [selectedCondition, setSelectedCondition] = useState("");
+  // ============================================================
+  // CONDIÇÕES
+  // ============================================================
 
   const conditionOptions = [
     "Novo",
@@ -51,157 +85,377 @@ export default function AnnounceScreen() {
     "Quebrado",
   ];
 
-  const [image, setImage] = useState<any>(null);
+  // ============================================================
+  // SELECIONAR IMAGENS
+  // ============================================================
 
-  async function pickImage() {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      quality: 1,
-    });
+  async function pickImages() {
+    const quantidadeDisponivel =
+      LIMITE_IMAGENS - images.length;
 
-    if (!result.canceled) {
-      setImage(result.assets[0]);
+    if (quantidadeDisponivel <= 0) {
+      setErrorMessage(
+        `Você pode adicionar no máximo ${LIMITE_IMAGENS} imagens por anúncio.`
+      );
+
+      setErrorModalVisible(true);
+
+      return;
+    }
+
+    try {
+      const result =
+        await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ["images"],
+          allowsMultipleSelection: true,
+          selectionLimit: quantidadeDisponivel,
+          quality: 1,
+        });
+
+      if (!result.canceled) {
+        const novasImagens = result.assets || [];
+
+        setImages((imagensAnteriores) => {
+          const todasImagens = [
+            ...imagensAnteriores,
+            ...novasImagens,
+          ];
+
+          return todasImagens.slice(
+            0,
+            LIMITE_IMAGENS
+          );
+        });
+      }
+    } catch (error) {
+      console.log(
+        "Erro ao selecionar imagens:",
+        error
+      );
+
+      setErrorMessage(
+        "Não foi possível selecionar as imagens."
+      );
+
+      setErrorModalVisible(true);
     }
   }
 
-  async function handlePublish() {
-    if (!title || !selectedCategory || !selectedCondition) {
+  // ============================================================
+  // REMOVER IMAGEM
+  // ============================================================
+
+  function removerImagem(index: number) {
+    const novasImagens = images.filter(
+      (_, imageIndex) => imageIndex !== index
+    );
+
+    setImages(novasImagens);
+
+    let novoIndice = imagemAtual;
+
+    if (novasImagens.length === 0) {
+      novoIndice = 0;
+    } else if (
+      imagemAtual >= novasImagens.length
+    ) {
+      novoIndice = novasImagens.length - 1;
+    }
+
+    setImagemAtual(novoIndice);
+
+    setTimeout(() => {
+      carouselRef.current?.scrollTo({
+        x: novoIndice * (SCREEN_WIDTH - 40),
+        animated: true,
+      });
+    }, 100);
+  }
+
+  // ============================================================
+  // CONTROLAR SLIDE
+  // ============================================================
+
+  function handleScrollEnd(
+    event: NativeSyntheticEvent<NativeScrollEvent>
+  ) {
+    const largura = SCREEN_WIDTH - 40;
+
+    const indice = Math.round(
+      event.nativeEvent.contentOffset.x / largura
+    );
+
+    setImagemAtual(indice);
+  }
+
+  // ============================================================
+  // IR PARA IMAGEM ANTERIOR
+  // ============================================================
+
+  function imagemAnterior() {
+    if (imagemAtual <= 0) {
+      return;
+    }
+
+    const novoIndice = imagemAtual - 1;
+
+    carouselRef.current?.scrollTo({
+      x: novoIndice * (SCREEN_WIDTH - 40),
+      animated: true,
+    });
+
+    setImagemAtual(novoIndice);
+  }
+
+  // ============================================================
+  // IR PARA PRÓXIMA IMAGEM
+  // ============================================================
+
+  function proximaImagem() {
+    if (imagemAtual >= images.length - 1) {
+      return;
+    }
+
+    const novoIndice = imagemAtual + 1;
+
+    carouselRef.current?.scrollTo({
+      x: novoIndice * (SCREEN_WIDTH - 40),
+      animated: true,
+    });
+
+    setImagemAtual(novoIndice);
+  }
+
+async function handlePublish() {
+  if (loading) return;
+
+  if (
+    !title.trim() ||
+    !selectedCategory ||
+    !selectedCondition
+  ) {
+    setErrorMessage(
+      "Preencha o título, a categoria e a condição da peça."
+    );
+    setErrorModalVisible(true);
+    return;
+  }
+
+  if (images.length === 0) {
+    setErrorMessage(
+      "Adicione pelo menos uma imagem do produto."
+    );
+    setErrorModalVisible(true);
+    return;
+  }
+
+  if (images.length > LIMITE_IMAGENS) {
+    setErrorMessage(
+      `Você pode adicionar no máximo ${LIMITE_IMAGENS} imagens.`
+    );
+    setErrorModalVisible(true);
+    return;
+  }
+
+  const limiteBytes = 5 * 1024 * 1024;
+
+  const imagemMuitoGrande = images.some(
+    (image) =>
+      (image.file?.size ?? image.fileSize ?? 0) >
+      limiteBytes
+  );
+
+  if (imagemMuitoGrande) {
+    setErrorMessage(
+      "Cada imagem deve ter no máximo 5 MB."
+    );
+    setErrorModalVisible(true);
+    return;
+  }
+
+  setLoading(true);
+
+  try {
+    const token =
+      (await AsyncStorage.getItem("token")) ||
+      (await AsyncStorage.getItem("userToken"));
+
+    if (!token) {
       setErrorMessage(
-        "Preencha pelo menos o título, a categoria e a condição da peça."
+        "Entre na sua conta para publicar um anúncio."
       );
       setErrorModalVisible(true);
       return;
     }
 
-    setLoading(true);
+    const categoryFound = categories.find(
+      (cat) => cat.nome === selectedCategory
+    );
 
-    try {
-      const token =
-        (await AsyncStorage.getItem("token")) ||
-        (await AsyncStorage.getItem("userToken"));
-
-      const categoryFound = categories.find(
-        (cat) => cat.nome === selectedCategory
+    if (!categoryFound) {
+      setErrorMessage(
+        "Selecione uma categoria válida."
       );
-
-      const id_categoria = categoryFound
-        ? categoryFound.id
-        : 1;
-
-      const conditionMap: Record<string, string> = {
-        Novo: "N",
-        Seminovo: "S",
-        Usado: "U",
-        Quebrado: "Q",
-      };
-
-      const stCondicao =
-        conditionMap[selectedCondition] || "U";
-
-      const formData = new FormData();
-
-      formData.append(
-        "id_categoria",
-        String(id_categoria)
-      );
-
-      formData.append(
-        "nm_produto",
-        title
-      );
-
-      formData.append(
-        "ds_produto",
-        description || ""
-      );
-
-      formData.append(
-        "st_condicao",
-        stCondicao
-      );
-
-      formData.append(
-        "st_status",
-        "A"
-      );
-
-      if (image) {
-        if (image.file) {
-          formData.append(
-            "imagem",
-            image.file
-          );
-        } else if (
-          image.uri.startsWith("blob:") ||
-          image.uri.startsWith("http")
-        ) {
-          const response =
-            await fetch(image.uri);
-
-          const blob =
-            await response.blob();
-
-          formData.append(
-            "imagem",
-            blob,
-            "produto.jpg"
-          );
-        } else {
-          formData.append(
-            "imagem",
-            {
-              uri: image.uri,
-              name:
-                image.fileName ||
-                "produto.jpg",
-              type:
-                image.mimeType ||
-                "image/jpeg",
-            } as any
-          );
-        }
-      }
-
-      await api.post(
-        "/products",
-        formData,
-        {
-          headers: {
-            "Content-Type":
-              "multipart/form-data",
-            Accept:
-              "application/json",
-            Authorization:
-              `Bearer ${token}`,
-          },
-        }
-      );
-
-      setTitle("");
-      setDescription("");
-      setSelectedCategory("");
-      setSelectedCondition("");
-      setImage(null);
-
-      setSuccessModalVisible(true);
-    } catch (error: any) {
-      console.log(
-        "ERRO SERVIDOR LARAVEL:",
-        error.response?.data ||
-          error.message
-      );
-
-      const message =
-        error.response?.data?.message ||
-        error.response?.data?.error ||
-        "Não foi possível publicar o anúncio.";
-
-      setErrorMessage(message);
       setErrorModalVisible(true);
-    } finally {
-      setLoading(false);
+      return;
     }
+
+    const conditionMap: Record<string, string> = {
+      Novo: "N",
+      Seminovo: "S",
+      Usado: "U",
+      Quebrado: "Q",
+    };
+
+    const stCondicao =
+      conditionMap[selectedCondition];
+
+    if (!stCondicao) {
+      setErrorMessage(
+        "Selecione uma condição válida."
+      );
+      setErrorModalVisible(true);
+      return;
+    }
+
+    const formData = new FormData();
+
+    formData.append(
+      "id_categoria",
+      String(categoryFound.id)
+    );
+
+    formData.append(
+      "nm_produto",
+      title.trim()
+    );
+
+    formData.append(
+      "ds_produto",
+      description.trim()
+    );
+
+    formData.append(
+      "st_condicao",
+      stCondicao
+    );
+
+    formData.append(
+      "st_status",
+      "A"
+    );
+
+    // ========================================================
+    // ENVIAR TODAS AS IMAGENS
+    // ========================================================
+
+    for (const [index, image] of images.entries()) {
+      const nomeArquivo =
+        image.fileName ||
+        `produto-${index + 1}.jpg`;
+
+      if (image.file) {
+        // Expo Web: arquivo selecionado pelo navegador.
+        formData.append(
+          "imagens[]",
+          image.file
+        );
+      } else if (
+        image.uri.startsWith("blob:") ||
+        image.uri.startsWith("http") ||
+        image.uri.startsWith("data:")
+      ) {
+        // Converte a URI em um arquivo para envio.
+        const response = await fetch(image.uri);
+        const blob = await response.blob();
+
+        if (blob.size > limiteBytes) {
+          throw new Error(
+            `A imagem ${index + 1} ultrapassa o limite de 5 MB.`
+          );
+        }
+
+        formData.append(
+          "imagens[]",
+          blob,
+          nomeArquivo
+        );
+      } else {
+        // Expo Go: arquivo local do celular.
+        formData.append(
+          "imagens[]",
+          {
+            uri: image.uri,
+            name: nomeArquivo,
+            type:
+              image.mimeType ||
+              "image/jpeg",
+          } as any
+        );
+      }
+    }
+
+    // ========================================================
+    // PUBLICAR PRODUTO
+    // ========================================================
+
+    await api.post(
+      "/products",
+      formData,
+      {
+        headers: {
+          "Content-Type": "multipart/form-data",
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    // ========================================================
+    // LIMPAR FORMULÁRIO
+    // ========================================================
+
+    setTitle("");
+    setDescription("");
+    setSelectedCategory("");
+    setSelectedCondition("");
+    setImages([]);
+    setImagemAtual(0);
+
+    carouselRef.current?.scrollTo({
+      x: 0,
+      animated: false,
+    });
+
+    setSuccessModalVisible(true);
+  } catch (error: any) {
+    console.log(
+      "ERRO SERVIDOR LARAVEL:",
+      error.response?.data || error.message
+    );
+
+    const errosValidacao =
+      error.response?.data?.errors;
+
+    const mensagensValidacao = errosValidacao
+      ? Object.values(errosValidacao)
+          .flat()
+          .join("\n")
+      : "";
+
+    const message =
+      mensagensValidacao ||
+      error.response?.data?.message ||
+      error.response?.data?.error ||
+      error.message ||
+      "Não foi possível publicar o anúncio.";
+
+    setErrorMessage(message);
+    setErrorModalVisible(true);
+  } finally {
+    setLoading(false);
   }
+}
 
   return (
     <ScrollView
@@ -209,7 +463,10 @@ export default function AnnounceScreen() {
       contentContainerStyle={styles.content}
       showsVerticalScrollIndicator={false}
     >
-      {/* TÍTULO DA TELA */}
+      {/* ====================================================== */}
+      {/* TÍTULO */}
+      {/* ====================================================== */}
+
       <Text style={styles.mainTitle}>
         Anunciar
       </Text>
@@ -218,7 +475,10 @@ export default function AnnounceScreen() {
         Preencha as informações para trocar seu componente.
       </Text>
 
-      {/* Título do Anúncio */}
+      {/* ====================================================== */}
+      {/* TÍTULO DO ANÚNCIO */}
+      {/* ====================================================== */}
+
       <View style={styles.fieldGroup}>
         <Text style={styles.label}>
           Título do Anúncio
@@ -234,7 +494,10 @@ export default function AnnounceScreen() {
         />
       </View>
 
-      {/* Categoria */}
+      {/* ====================================================== */}
+      {/* CATEGORIA */}
+      {/* ====================================================== */}
+
       <View style={styles.fieldGroup}>
         <Text style={styles.label}>
           Categoria
@@ -266,7 +529,10 @@ export default function AnnounceScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Estado de Conservação */}
+      {/* ====================================================== */}
+      {/* ESTADO DE CONSERVAÇÃO */}
+      {/* ====================================================== */}
+
       <View style={styles.fieldGroup}>
         <Text style={styles.label}>
           Estado de Conservação
@@ -298,59 +564,262 @@ export default function AnnounceScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Imagens do Produto */}
+      {/* ====================================================== */}
+      {/* IMAGENS DO PRODUTO */}
+      {/* ====================================================== */}
+
       <View style={styles.fieldGroup}>
-        <Text style={styles.label}>
-          Imagens do Produto
-        </Text>
+        <View style={styles.imagesTitleRow}>
+          <Text style={styles.label}>
+            Imagens do Produto
+          </Text>
+
+          <Text style={styles.imageCounterTop}>
+            {images.length}/{LIMITE_IMAGENS}
+          </Text>
+        </View>
+
+        {/* BOTÃO ADICIONAR */}
 
         <TouchableOpacity
-          style={styles.photosButton}
+          style={[
+            styles.photosButton,
+
+            images.length >= LIMITE_IMAGENS &&
+              styles.photosButtonDisabled,
+          ]}
           activeOpacity={0.8}
-          onPress={pickImage}
+          onPress={pickImages}
+          disabled={
+            images.length >= LIMITE_IMAGENS
+          }
         >
           <Feather
-            name="image"
+            name={
+              images.length === 0
+                ? "image"
+                : "plus"
+            }
             size={22}
-            color="#444"
+            color={
+              images.length >= LIMITE_IMAGENS
+                ? "#999"
+                : "#444"
+            }
           />
 
-          <Text style={styles.photosButtonText}>
-            {image
-              ? "📷 Trocar imagem"
-              : "Adicionar Fotos da Peça"}
+          <Text
+            style={[
+              styles.photosButtonText,
+
+              images.length >=
+                LIMITE_IMAGENS && {
+                color: "#999",
+              },
+            ]}
+          >
+            {images.length === 0
+              ? "Adicionar Fotos da Peça"
+              : images.length >=
+                  LIMITE_IMAGENS
+                ? "Limite de Fotos Atingido"
+                : "Adicionar Mais Fotos"}
           </Text>
         </TouchableOpacity>
 
-        {image && (
-          <View
-            style={
-              styles.imagePreviewContainer
-            }
-          >
-            <Image
-              source={{ uri: image.uri }}
-              style={styles.imagePreview}
-              resizeMode="contain"
-            />
+        {/* ==================================================== */}
+        {/* CARROSSEL */}
+        {/* ==================================================== */}
 
-            <TouchableOpacity
-              style={styles.removeImageButton}
-              onPress={() =>
-                setImage(null)
+        {images.length > 0 && (
+          <>
+            <View
+              style={
+                styles.carouselContainer
               }
             >
-              <Feather
-                name="x"
-                size={20}
-                color="#fff"
-              />
-            </TouchableOpacity>
-          </View>
+              <ScrollView
+                ref={carouselRef}
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={
+                  false
+                }
+                onMomentumScrollEnd={
+                  handleScrollEnd
+                }
+                scrollEventThrottle={16}
+              >
+                {images.map(
+                  (item, index) => (
+                    <View
+                      key={`${item.uri}-${index}`}
+                      style={
+                        styles.imageSlide
+                      }
+                    >
+                      <Image
+                        source={{
+                          uri: item.uri,
+                        }}
+                        style={
+                          styles.imagePreview
+                        }
+                        resizeMode="cover"
+                      />
+
+                      {/* PRIMEIRA FOTO */}
+
+                      {index === 0 && (
+                        <View
+                          style={
+                            styles.mainImageBadge
+                          }
+                        >
+                          <Feather
+                            name="star"
+                            size={13}
+                            color="#FFFFFF"
+                          />
+
+                          <Text
+                            style={
+                              styles.mainImageText
+                            }
+                          >
+                            Foto principal
+                          </Text>
+                        </View>
+                      )}
+
+                      {/* REMOVER */}
+
+                      <TouchableOpacity
+                        style={
+                          styles.removeImageButton
+                        }
+                        onPress={() =>
+                          removerImagem(
+                            index
+                          )
+                        }
+                        activeOpacity={0.8}
+                      >
+                        <Feather
+                          name="x"
+                          size={20}
+                          color="#fff"
+                        />
+                      </TouchableOpacity>
+                    </View>
+                  )
+                )}
+              </ScrollView>
+
+              {/* SETA ESQUERDA */}
+
+              {imagemAtual > 0 && (
+                <TouchableOpacity
+                  style={[
+                    styles.carouselArrow,
+                    styles.carouselArrowLeft,
+                  ]}
+                  onPress={
+                    imagemAnterior
+                  }
+                  activeOpacity={0.8}
+                >
+                  <Feather
+                    name="chevron-left"
+                    size={26}
+                    color="#FFFFFF"
+                  />
+                </TouchableOpacity>
+              )}
+
+              {/* SETA DIREITA */}
+
+              {imagemAtual <
+                images.length - 1 && (
+                <TouchableOpacity
+                  style={[
+                    styles.carouselArrow,
+                    styles.carouselArrowRight,
+                  ]}
+                  onPress={
+                    proximaImagem
+                  }
+                  activeOpacity={0.8}
+                >
+                  <Feather
+                    name="chevron-right"
+                    size={26}
+                    color="#FFFFFF"
+                  />
+                </TouchableOpacity>
+              )}
+
+              {/* CONTADOR SOBRE A FOTO */}
+
+              <View
+                style={
+                  styles.slideCounter
+                }
+              >
+                <Text
+                  style={
+                    styles.slideCounterText
+                  }
+                >
+                  {imagemAtual + 1} /{" "}
+                  {images.length}
+                </Text>
+              </View>
+            </View>
+
+            {/* BOLINHAS */}
+
+            {images.length > 1 && (
+              <View
+                style={
+                  styles.pagination
+                }
+              >
+                {images.map(
+                  (_, index) => (
+                    <View
+                      key={index}
+                      style={[
+                        styles.paginationDot,
+
+                        index ===
+                          imagemAtual &&
+                          styles.paginationDotActive,
+                      ]}
+                    />
+                  )
+                )}
+              </View>
+            )}
+
+            <Text
+              style={
+                styles.imagesHelpText
+              }
+            >
+              Você pode adicionar até{" "}
+              {LIMITE_IMAGENS} imagens.
+              Arraste para o lado para
+              visualizar as fotos.
+            </Text>
+          </>
         )}
       </View>
 
-      {/* Descrição Detalhada */}
+      {/* ====================================================== */}
+      {/* DESCRIÇÃO */}
+      {/* ====================================================== */}
+
       <View style={styles.fieldGroup}>
         <Text style={styles.label}>
           Descrição Detalhada
@@ -371,11 +840,16 @@ export default function AnnounceScreen() {
         />
       </View>
 
-      {/* Botão Publicar */}
+      {/* ====================================================== */}
+      {/* PUBLICAR */}
+      {/* ====================================================== */}
+
       <TouchableOpacity
         style={[
           styles.publishButton,
-          loading && { opacity: 0.7 },
+          loading && {
+            opacity: 0.7,
+          },
         ]}
         activeOpacity={0.8}
         onPress={handlePublish}
@@ -388,14 +862,19 @@ export default function AnnounceScreen() {
           />
         ) : (
           <Text
-            style={styles.publishButtonText}
+            style={
+              styles.publishButtonText
+            }
           >
             Publicar Anúncio
           </Text>
         )}
       </TouchableOpacity>
 
-      {/* Modal Categoria */}
+      {/* ====================================================== */}
+      {/* MODAL CATEGORIA */}
+      {/* ====================================================== */}
+
       <Modal
         visible={categoryModalVisible}
         animationType="slide"
@@ -405,8 +884,12 @@ export default function AnnounceScreen() {
         }
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <Text style={styles.modalTitle}>
+          <View
+            style={styles.modalContainer}
+          >
+            <Text
+              style={styles.modalTitle}
+            >
               Selecione a Categoria
             </Text>
 
@@ -418,6 +901,7 @@ export default function AnnounceScreen() {
                   setSelectedCategory(
                     item.nome
                   );
+
                   setCategoryModalVisible(
                     false
                   );
@@ -455,18 +939,29 @@ export default function AnnounceScreen() {
         </View>
       </Modal>
 
-      {/* Modal Condição */}
+      {/* ====================================================== */}
+      {/* MODAL CONDIÇÃO */}
+      {/* ====================================================== */}
+
       <Modal
-        visible={conditionModalVisible}
+        visible={
+          conditionModalVisible
+        }
         animationType="slide"
         transparent
         onRequestClose={() =>
-          setConditionModalVisible(false)
+          setConditionModalVisible(
+            false
+          )
         }
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <Text style={styles.modalTitle}>
+          <View
+            style={styles.modalContainer}
+          >
+            <Text
+              style={styles.modalTitle}
+            >
               Estado de Conservação
             </Text>
 
@@ -474,11 +969,14 @@ export default function AnnounceScreen() {
               (item) => (
                 <TouchableOpacity
                   key={item}
-                  style={styles.modalItem}
+                  style={
+                    styles.modalItem
+                  }
                   onPress={() => {
                     setSelectedCondition(
                       item
                     );
+
                     setConditionModalVisible(
                       false
                     );
@@ -517,11 +1015,16 @@ export default function AnnounceScreen() {
         </View>
       </Modal>
 
-      {/* Modal de sucesso */}
+      {/* ====================================================== */}
+      {/* MODAL SUCESSO */}
+      {/* ====================================================== */}
+
       <Modal
         animationType="fade"
         transparent={true}
-        visible={successModalVisible}
+        visible={
+          successModalVisible
+        }
         onRequestClose={() =>
           setSuccessModalVisible(false)
         }
@@ -549,7 +1052,10 @@ export default function AnnounceScreen() {
                 styles.logoutModalSubtitle
               }
             >
-              Sua peça foi cadastrada com sucesso e já está disponível para visualização no aplicativo.
+              Sua peça foi cadastrada com
+              sucesso e já está disponível
+              para visualização no
+              aplicativo.
             </Text>
 
             <View
@@ -565,6 +1071,7 @@ export default function AnnounceScreen() {
                   setSuccessModalVisible(
                     false
                   );
+
                   router.replace("/");
                 }}
               >
@@ -581,7 +1088,10 @@ export default function AnnounceScreen() {
         </View>
       </Modal>
 
-      {/* Modal de erro */}
+      {/* ====================================================== */}
+      {/* MODAL ERRO */}
+      {/* ====================================================== */}
+
       <Modal
         animationType="fade"
         transparent={true}
@@ -603,7 +1113,9 @@ export default function AnnounceScreen() {
             <Text
               style={[
                 styles.logoutModalTitle,
-                { color: "#E53935" },
+                {
+                  color: "#E53935",
+                },
               ]}
             >
               Anúncio não publicado
@@ -651,6 +1163,10 @@ export default function AnnounceScreen() {
     </ScrollView>
   );
 }
+
+// ============================================================
+// ESTILOS
+// ============================================================
 
 const styles = StyleSheet.create({
   container: {
@@ -730,6 +1246,23 @@ const styles = StyleSheet.create({
     color: "#777777",
   },
 
+  // ==========================================================
+  // IMAGENS
+  // ==========================================================
+
+  imagesTitleRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+
+  imageCounterTop: {
+    fontFamily: "Montserrat_600SemiBold",
+    fontSize: 13,
+    color: "#005386",
+    marginBottom: 8,
+  },
+
   photosButton: {
     backgroundColor: "#e2e2e2",
     borderWidth: 1,
@@ -740,6 +1273,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 16,
+    flexDirection: "row",
+    gap: 8,
+  },
+
+  photosButtonDisabled: {
+    backgroundColor: "#eeeeee",
+    borderColor: "#cccccc",
   },
 
   photosButtonText: {
@@ -748,15 +1288,22 @@ const styles = StyleSheet.create({
     color: "#444",
   },
 
-  imagePreviewContainer: {
+  carouselContainer: {
     position: "relative",
-    marginBottom: 16,
+    width: SCREEN_WIDTH - 40,
+    height: 230,
     borderRadius: 12,
     overflow: "hidden",
-    borderWidth: 2,
+    backgroundColor: "#f2f2f2",
+    borderWidth: 1,
     borderColor: "#0099FF",
-    backgroundColor: "#f5f5f5",
-    aspectRatio: 16 / 9,
+  },
+
+  imageSlide: {
+    width: SCREEN_WIDTH - 40,
+    height: 230,
+    position: "relative",
+    backgroundColor: "#eeeeee",
   },
 
   imagePreview: {
@@ -769,7 +1316,8 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 10,
     right: 10,
-    backgroundColor: "rgba(255, 0, 0, 0.8)",
+    backgroundColor:
+      "rgba(229, 57, 53, 0.9)",
     borderRadius: 20,
     width: 36,
     height: 36,
@@ -779,11 +1327,109 @@ const styles = StyleSheet.create({
     borderColor: "#fff",
   },
 
+  mainImageBadge: {
+    position: "absolute",
+    top: 12,
+    left: 12,
+    backgroundColor:
+      "rgba(0, 83, 134, 0.90)",
+    borderRadius: 15,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+
+  mainImageText: {
+    fontFamily: "Montserrat_600SemiBold",
+    fontSize: 11,
+    color: "#FFFFFF",
+  },
+
+  carouselArrow: {
+    position: "absolute",
+    top: "50%",
+    marginTop: -20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor:
+      "rgba(0, 0, 0, 0.45)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  carouselArrowLeft: {
+    left: 10,
+  },
+
+  carouselArrowRight: {
+    right: 10,
+  },
+
+  slideCounter: {
+    position: "absolute",
+    bottom: 10,
+    right: 10,
+    backgroundColor:
+      "rgba(0, 0, 0, 0.55)",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 15,
+  },
+
+  slideCounterText: {
+    fontFamily: "Montserrat_600SemiBold",
+    fontSize: 12,
+    color: "#FFFFFF",
+  },
+
+  pagination: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 10,
+    marginBottom: 4,
+    gap: 6,
+  },
+
+  paginationDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: "#CCCCCC",
+  },
+
+  paginationDotActive: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: "#005386",
+  },
+
+  imagesHelpText: {
+    fontFamily: "Montserrat_400Regular",
+    fontSize: 11,
+    color: "#777777",
+    textAlign: "center",
+    marginTop: 5,
+    marginBottom: 16,
+  },
+
+  // ==========================================================
+  // DESCRIÇÃO
+  // ==========================================================
+
   textArea: {
     height: 100,
     paddingTop: 12,
     textAlignVertical: "top",
   },
+
+  // ==========================================================
+  // PUBLICAR
+  // ==========================================================
 
   publishButton: {
     backgroundColor: "#005386",
@@ -801,9 +1447,14 @@ const styles = StyleSheet.create({
     color: "#fff",
   },
 
+  // ==========================================================
+  // MODAIS
+  // ==========================================================
+
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
+    backgroundColor:
+      "rgba(0,0,0,0.5)",
     justifyContent: "flex-end",
   },
 
@@ -851,7 +1502,8 @@ const styles = StyleSheet.create({
 
   profileModalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    backgroundColor:
+      "rgba(0, 0, 0, 0.5)",
     justifyContent: "center",
     alignItems: "center",
     padding: 24,
