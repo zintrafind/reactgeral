@@ -7,7 +7,6 @@ import React, {
   useRef,
   useState,
 } from "react";
-
 import {
   ActivityIndicator,
   Dimensions,
@@ -15,6 +14,7 @@ import {
   Modal,
   NativeScrollEvent,
   NativeSyntheticEvent,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -22,143 +22,110 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-
 import { SafeAreaView } from "react-native-safe-area-context";
-
 import api from "../../services/api";
-
 const LIMITE_IMAGENS = 3;
-
 const { width: SCREEN_WIDTH } =
   Dimensions.get("window");
-
 /* ================================================================
    URL DA IMAGEM
 ================================================================ */
-
 function getImageUrl(
   imagePath?: string | null
 ): string | null {
   if (!imagePath) {
     return null;
   }
-
   const path = String(imagePath).trim();
-
   if (!path) {
     return null;
   }
-
   if (
     path.startsWith("http://") ||
     path.startsWith("https://")
   ) {
     return path;
   }
-
   const baseUrl =
     api.defaults.baseURL?.replace(
       /\/api\/?$/,
       ""
     ) ||
     "http://127.0.0.1:8000";
-
   const cleanPath = path
     .replace(/^\/+/, "")
     .replace(/^storage\/+/, "");
-
   return `${baseUrl}/storage/${cleanPath}`;
 }
-
 /* ================================================================
    TELA
 ================================================================ */
-
 export default function DenunciaScreen() {
   const router = useRouter();
-
+  const enviandoRef = useRef(false);
+  const enviadaRef = useRef(false);
   const params = useLocalSearchParams();
-
   /* ==============================================================
      USUÁRIO DENUNCIADO
   ============================================================== */
-
   const idUsuario = Array.isArray(params.id)
     ? params.id[0]
     : params.id;
-
   const nomeUsuarioParam = Array.isArray(
     params.nome
   )
     ? params.nome[0]
     : params.nome;
-
   const [nomeUsuario, setNomeUsuario] =
     useState(
       nomeUsuarioParam || "Usuário"
     );
-
   const [fotoUsuario, setFotoUsuario] =
     useState<string | null>(null);
-
   /* ==============================================================
      FORMULÁRIO
   ============================================================== */
-
   const [
     selectedCategory,
     setSelectedCategory,
   ] = useState("");
-
   const [description, setDescription] =
     useState("");
-
   const [loading, setLoading] =
     useState(false);
-
   /* ==============================================================
      MODAIS
   ============================================================== */
-
   const [
     categoryModalVisible,
     setCategoryModalVisible,
   ] = useState(false);
-
   const [
     successModalVisible,
     setSuccessModalVisible,
   ] = useState(false);
-
   const [
     errorModalVisible,
     setErrorModalVisible,
   ] = useState(false);
-
   const [
     errorMessage,
     setErrorMessage,
   ] = useState("");
-
   /* ==============================================================
      IMAGENS
   ============================================================== */
-
   const [images, setImages] =
-    useState<any[]>([]);
-
+    useState<ImagePicker.ImagePickerAsset[]>([]);
   const [
     imagemAtual,
     setImagemAtual,
   ] = useState(0);
-
   const carouselRef =
     useRef<ScrollView>(null);
-
   /* ==============================================================
      CATEGORIAS
   ============================================================== */
-
   const categories = [
     {
       id: 1,
@@ -166,42 +133,36 @@ export default function DenunciaScreen() {
       descricao:
         "Insultos, ofensas ou comportamento inadequado.",
     },
-
     {
       id: 2,
       nome: "Assédio",
       descricao:
         "Mensagens insistentes, intimidação ou perseguição.",
     },
-
     {
       id: 3,
       nome: "Golpe ou fraude",
       descricao:
         "Tentativa de golpe, fraude ou negociação suspeita.",
     },
-
     {
       id: 4,
       nome: "Conteúdo impróprio",
       descricao:
         "Conteúdo ofensivo, inadequado ou proibido.",
     },
-
     {
       id: 5,
       nome: "Spam",
       descricao:
         "Mensagens repetitivas ou conteúdo indesejado.",
     },
-
     {
       id: 6,
       nome: "Problema durante a negociação",
       descricao:
         "Problemas relacionados à negociação ou troca.",
     },
-
     {
       id: 7,
       nome: "Outro",
@@ -209,32 +170,26 @@ export default function DenunciaScreen() {
         "Outro motivo que não está listado acima.",
     },
   ];
-
   /* ==============================================================
      CARREGAR USUÁRIO DENUNCIADO
   ============================================================== */
-
   useEffect(() => {
     let ativo = true;
-
     async function carregarUsuario() {
       try {
         if (!idUsuario) {
           return;
         }
-
         const token =
           await AsyncStorage.getItem(
             "token"
           );
-
         const response = await api.get(
           `/users/${idUsuario}`,
           {
             headers: {
               Accept:
                 "application/json",
-
               ...(token
                 ? {
                     Authorization: `Bearer ${token}`,
@@ -243,43 +198,33 @@ export default function DenunciaScreen() {
             },
           }
         );
-
         if (!ativo) {
           return;
         }
-
         const data = response.data;
-
         const usuario =
           data?.user ||
           data?.usuario ||
           data?.data ||
           data;
-
         if (!usuario) {
           return;
         }
-
         /* NOME */
-
         const nome =
           usuario?.nm_usuario ||
           usuario?.nome ||
           usuario?.name ||
           nomeUsuarioParam ||
           "Usuário";
-
         setNomeUsuario(nome);
-
         /* FOTO */
-
         const foto =
           usuario?.ds_foto_perfil ||
           usuario?.ds_foto ||
           usuario?.foto_perfil ||
           usuario?.foto ||
           null;
-
         setFotoUsuario(
           getImageUrl(foto)
         );
@@ -291,35 +236,28 @@ export default function DenunciaScreen() {
         );
       }
     }
-
     carregarUsuario();
-
     return () => {
       ativo = false;
     };
   }, [idUsuario, nomeUsuarioParam]);
-
   /* ==============================================================
      SELECIONAR IMAGENS
   ============================================================== */
-
   async function pickImages() {
+    if (enviandoRef.current || enviadaRef.current) return;
     const quantidadeDisponivel =
       LIMITE_IMAGENS -
       images.length;
-
     if (
       quantidadeDisponivel <= 0
     ) {
       setErrorMessage(
         `Você pode adicionar no máximo ${LIMITE_IMAGENS} imagens como evidência.`
       );
-
       setErrorModalVisible(true);
-
       return;
     }
-
     try {
       const result =
         await ImagePicker.launchImageLibraryAsync(
@@ -327,21 +265,16 @@ export default function DenunciaScreen() {
             mediaTypes: [
               "images",
             ],
-
             allowsMultipleSelection:
               true,
-
             selectionLimit:
               quantidadeDisponivel,
-
             quality: 0.9,
           }
         );
-
       if (!result.canceled) {
         const novasImagens =
           result.assets || [];
-
         setImages(
           (
             imagensAnteriores
@@ -350,7 +283,6 @@ export default function DenunciaScreen() {
               ...imagensAnteriores,
               ...novasImagens,
             ];
-
             return todasImagens.slice(
               0,
               LIMITE_IMAGENS
@@ -363,35 +295,29 @@ export default function DenunciaScreen() {
         "Erro ao selecionar imagens:",
         error
       );
-
       setErrorMessage(
         "Não foi possível selecionar as imagens."
       );
-
       setErrorModalVisible(
         true
       );
     }
   }
-
   /* ==============================================================
      REMOVER IMAGEM
   ============================================================== */
-
   function removerImagem(
     index: number
   ) {
+    if (enviandoRef.current || enviadaRef.current) return;
     const novasImagens =
       images.filter(
         (_, imageIndex) =>
           imageIndex !== index
       );
-
     setImages(novasImagens);
-
     let novoIndice =
       imagemAtual;
-
     if (
       novasImagens.length === 0
     ) {
@@ -403,75 +329,60 @@ export default function DenunciaScreen() {
       novoIndice =
         novasImagens.length - 1;
     }
-
     setImagemAtual(
       novoIndice
     );
-
     setTimeout(() => {
       carouselRef.current?.scrollTo(
         {
           x:
             novoIndice *
             (SCREEN_WIDTH - 40),
-
           animated: true,
         }
       );
     }, 100);
   }
-
   /* ==============================================================
      CONTROLAR CARROSSEL
   ============================================================== */
-
   function handleScrollEnd(
     event: NativeSyntheticEvent<NativeScrollEvent>
   ) {
     const largura =
       SCREEN_WIDTH - 40;
-
     const indice =
       Math.round(
         event.nativeEvent
           .contentOffset.x /
           largura
       );
-
     setImagemAtual(indice);
   }
-
   /* ==============================================================
      IMAGEM ANTERIOR
   ============================================================== */
-
   function imagemAnterior() {
     if (imagemAtual <= 0) {
       return;
     }
-
     const novoIndice =
       imagemAtual - 1;
-
     carouselRef.current?.scrollTo(
       {
         x:
           novoIndice *
           (SCREEN_WIDTH - 40),
-
         animated: true,
       }
     );
-
     setImagemAtual(
       novoIndice
     );
   }
-
   /* ==============================================================
      PRÓXIMA IMAGEM
   ============================================================== */
-
   function proximaImagem() {
     if (
       imagemAtual >=
@@ -479,155 +390,143 @@ export default function DenunciaScreen() {
     ) {
       return;
     }
-
     const novoIndice =
       imagemAtual + 1;
-
     carouselRef.current?.scrollTo(
       {
         x:
           novoIndice *
           (SCREEN_WIDTH - 40),
-
         animated: true,
       }
     );
-
     setImagemAtual(
       novoIndice
     );
   }
-
   /* ==============================================================
      ENVIAR DENÚNCIA
   ============================================================== */
-
   async function handleDenunciar() {
-    if (!idUsuario) {
-      setErrorMessage(
-        "Não foi possível identificar o usuário denunciado."
-      );
+    if (enviandoRef.current || enviadaRef.current) return;
 
+    const mostrarErro = (mensagem: string) => {
+      setErrorMessage(mensagem);
       setErrorModalVisible(true);
+    };
 
+    if (!idUsuario || !/^\d+$/.test(String(idUsuario))) {
+      mostrarErro("Não foi possível identificar o usuário denunciado.");
+      return;
+    }
+    if (!categories.some((item) => item.nome === selectedCategory)) {
+      mostrarErro("Selecione o motivo da denúncia.");
+      return;
+    }
+    const descricao = description.trim();
+    if (descricao.length < 10 || descricao.length > 500) {
+      mostrarErro("A descrição deve possuir entre 10 e 500 caracteres.");
+      return;
+    }
+    if (images.length > LIMITE_IMAGENS) {
+      mostrarErro("Você pode enviar no máximo 3 imagens.");
       return;
     }
 
-    if (!selectedCategory) {
-      setErrorMessage(
-        "Selecione o motivo da denúncia."
-      );
-
-      setErrorModalVisible(true);
-
-      return;
-    }
-
-    if (!description.trim()) {
-      setErrorMessage(
-        "Descreva o que aconteceu para que possamos entender a denúncia."
-      );
-
-      setErrorModalVisible(true);
-
-      return;
-    }
-
-    if (
-      description.trim()
-        .length < 10
-    ) {
-      setErrorMessage(
-        "Forneça um pouco mais de detalhes sobre o ocorrido."
-      );
-
-      setErrorModalVisible(true);
-
-      return;
-    }
-
+    enviandoRef.current = true;
+    setLoading(true);
     try {
-      setLoading(true);
+      const token = await AsyncStorage.getItem("token");
+      if (!token) {
+        mostrarErro("Entre na sua conta para enviar uma denúncia.");
+        return;
+      }
 
-      /*
-       * ========================================================
-       * FUTURA INTEGRAÇÃO COM O LARAVEL
-       * ========================================================
-       *
-       * Depois o backend poderá receber:
-       *
-       * idUsuario
-       * selectedCategory
-       * description
-       * images
-       *
-       * Exemplo:
-       *
-       * POST /denuncias
-       *
-       * id_usuario_denunciado
-       * categoria
-       * descricao
-       * imagens
-       *
-       * Por enquanto esta tela está
-       * somente preparada no Front.
-       * ========================================================
-       */
+      const formData = new FormData();
+      formData.append("id_usuario_denunciado", String(idUsuario));
+      formData.append("categoria", selectedCategory);
+      formData.append("descricao", descricao);
 
-      console.log(
-        "DENÚNCIA PREPARADA:",
-        {
-          id_usuario_denunciado:
-            idUsuario,
+      const limiteBytes = 5 * 1024 * 1024;
+      const tiposPermitidos = ["image/jpeg", "image/png", "image/webp"];
 
-          nome_usuario:
-            nomeUsuario,
-
-          categoria:
-            selectedCategory,
-
-          descricao:
-            description,
-
-          imagens:
-            images,
+      for (let indice = 0; indice < images.length; indice++) {
+        const imagem = images[indice];
+        if (Platform.OS === "web") {
+          let arquivo: Blob;
+          if (imagem.file) {
+            arquivo = imagem.file;
+          } else {
+            const resposta = await fetch(imagem.uri);
+            if (!resposta.ok) {
+              throw new Error("Não foi possível preparar uma das imagens.");
+            }
+            arquivo = await resposta.blob();
+          }
+          if (arquivo.size > limiteBytes) {
+            throw new Error("Cada imagem deve possuir no máximo 5 MB.");
+          }
+          if (!tiposPermitidos.includes(arquivo.type)) {
+            throw new Error("Selecione imagens nos formatos JPG, PNG ou WEBP.");
+          }
+          const extensao = arquivo.type === "image/png" ? "png"
+            : arquivo.type === "image/webp" ? "webp" : "jpg";
+          formData.append("imagens[]", arquivo, `evidencia_${indice + 1}.${extensao}`);
+        } else {
+          if (imagem.fileSize && imagem.fileSize > limiteBytes) {
+            throw new Error("Cada imagem deve possuir no máximo 5 MB.");
+          }
+          const nome = String(imagem.fileName || imagem.uri).split("?")[0];
+          const extensaoOriginal = nome.split(".").pop()?.toLowerCase();
+          const tipoPelaExtensao = extensaoOriginal === "png" ? "image/png"
+            : extensaoOriginal === "webp" ? "image/webp"
+            : ["jpg", "jpeg"].includes(extensaoOriginal || "") ? "image/jpeg" : null;
+          const tipo = imagem.mimeType || tipoPelaExtensao;
+          if (!tipo || !tiposPermitidos.includes(tipo)) {
+            throw new Error("Selecione imagens nos formatos JPG, PNG ou WEBP.");
+          }
+          const extensao = tipo === "image/png" ? "png"
+            : tipo === "image/webp" ? "webp" : "jpg";
+          // React Native aceita um objeto com URI para upload multipart.
+          formData.append("imagens[]", {
+            uri: imagem.uri,
+            name: `evidencia_${indice + 1}.${extensao}`,
+            type: tipo,
+          } as any);
         }
-      );
+      }
 
-      await new Promise(
-        (resolve) =>
-          setTimeout(
-            resolve,
-            500
-          )
-      );
-
-      setSuccessModalVisible(
-        true
-      );
-    } catch (error) {
-      console.log(
-        "Erro ao preparar denúncia:",
-        error
-      );
-
-      setErrorMessage(
-        "Não foi possível registrar a denúncia."
-      );
-
-      setErrorModalVisible(
-        true
-      );
+      await api.post("/denuncias", formData, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+          "Content-Type": "multipart/form-data",
+        },
+      });
+      enviadaRef.current = true;
+      setSuccessModalVisible(true);
+    } catch (error: any) {
+      const status = error?.response?.status;
+      const mensagem = status === 401
+        ? "Sua sessão expirou. Entre novamente."
+        : status === 413
+          ? "As imagens ultrapassam o limite de envio do servidor."
+          : status === 429
+            ? "Você enviou muitas denúncias. Aguarde um minuto."
+            : error?.response?.data?.message ||
+              (error?.isAxiosError && !error?.response
+                ? "Não foi possível confirmar o envio. Confira sua conexão com a API."
+                : error?.message) ||
+              "Não foi possível registrar a denúncia.";
+      mostrarErro(mensagem);
     } finally {
+      enviandoRef.current = false;
       setLoading(false);
     }
   }
-
   /* ==============================================================
      VOLTAR
   ============================================================== */
-
   function voltar() {
     if (
       router.canGoBack()
@@ -637,11 +536,9 @@ export default function DenunciaScreen() {
       router.replace("/");
     }
   }
-
   /* ==============================================================
      INTERFACE
   ============================================================== */
-
   return (
     <SafeAreaView
       style={styles.safeArea}
@@ -649,7 +546,6 @@ export default function DenunciaScreen() {
       {/* ====================================================== */}
       {/* HEADER */}
       {/* ====================================================== */}
-
       <View
         style={styles.header}
       >
@@ -666,7 +562,6 @@ export default function DenunciaScreen() {
             color="#005386"
           />
         </TouchableOpacity>
-
         <Text
           style={
             styles.headerTitle
@@ -674,14 +569,12 @@ export default function DenunciaScreen() {
         >
           Denunciar Usuário
         </Text>
-
         <View
           style={
             styles.headerPlaceholder
           }
         />
       </View>
-
       <ScrollView
         style={
           styles.container
@@ -696,7 +589,6 @@ export default function DenunciaScreen() {
         {/* ==================================================== */}
         {/* TÍTULO */}
         {/* ==================================================== */}
-
         <Text
           style={
             styles.mainTitle
@@ -704,7 +596,6 @@ export default function DenunciaScreen() {
         >
           Fazer uma denúncia
         </Text>
-
         <Text
           style={
             styles.mainSubtitle
@@ -714,18 +605,15 @@ export default function DenunciaScreen() {
           denúncia e descreva o que
           aconteceu.
         </Text>
-
         {/* ==================================================== */}
         {/* USUÁRIO DENUNCIADO */}
         {/* ==================================================== */}
-
         <View
           style={
             styles.reportedUserCard
           }
         >
           {/* FOTO REAL */}
-
           {fotoUsuario ? (
             <Image
               source={{
@@ -749,9 +637,7 @@ export default function DenunciaScreen() {
               />
             </View>
           )}
-
           {/* NOME */}
-
           <View
             style={
               styles.reportedUserInfo
@@ -764,7 +650,6 @@ export default function DenunciaScreen() {
             >
               Usuário denunciado
             </Text>
-
             <Text
               style={
                 styles.reportedUserName
@@ -774,18 +659,15 @@ export default function DenunciaScreen() {
               {nomeUsuario}
             </Text>
           </View>
-
           <Feather
             name="flag"
             size={20}
             color="#D9534F"
           />
         </View>
-
         {/* ==================================================== */}
         {/* AVISO */}
         {/* ==================================================== */}
-
         <View
           style={
             styles.noticeCard
@@ -796,7 +678,6 @@ export default function DenunciaScreen() {
             size={19}
             color="#005386"
           />
-
           <Text
             style={
               styles.noticeText
@@ -810,11 +691,9 @@ export default function DenunciaScreen() {
             detalhes e evidências.
           </Text>
         </View>
-
         {/* ==================================================== */}
         {/* CATEGORIA */}
         {/* ==================================================== */}
-
         <View
           style={
             styles.fieldGroup
@@ -825,7 +704,6 @@ export default function DenunciaScreen() {
           >
             Motivo da denúncia
           </Text>
-
           <TouchableOpacity
             style={
               styles.inputPicker
@@ -847,7 +725,6 @@ export default function DenunciaScreen() {
               {selectedCategory ||
                 "Selecione o motivo"}
             </Text>
-
             <Feather
               name="chevron-down"
               size={18}
@@ -855,11 +732,9 @@ export default function DenunciaScreen() {
             />
           </TouchableOpacity>
         </View>
-
         {/* ==================================================== */}
         {/* DESCRIÇÃO */}
         {/* ==================================================== */}
-
         <View
           style={
             styles.fieldGroup
@@ -877,7 +752,6 @@ export default function DenunciaScreen() {
             >
               Descreva o ocorrido
             </Text>
-
             <Text
               style={
                 styles.characterCounter
@@ -887,7 +761,6 @@ export default function DenunciaScreen() {
               /500
             </Text>
           </View>
-
           <TextInput
             style={[
               styles.input,
@@ -905,11 +778,9 @@ export default function DenunciaScreen() {
             textAlignVertical="top"
           />
         </View>
-
         {/* ==================================================== */}
         {/* IMAGENS */}
         {/* ==================================================== */}
-
         <View
           style={
             styles.fieldGroup
@@ -928,7 +799,6 @@ export default function DenunciaScreen() {
               >
                 Evidências
               </Text>
-
               <Text
                 style={
                   styles.optionalText
@@ -937,7 +807,6 @@ export default function DenunciaScreen() {
                 Opcional
               </Text>
             </View>
-
             <Text
               style={
                 styles.imageCounterTop
@@ -947,13 +816,10 @@ export default function DenunciaScreen() {
               {LIMITE_IMAGENS}
             </Text>
           </View>
-
           {/* ADICIONAR */}
-
           <TouchableOpacity
             style={[
               styles.photosButton,
-
               images.length >=
                 LIMITE_IMAGENS &&
                 styles.photosButtonDisabled,
@@ -980,7 +846,6 @@ export default function DenunciaScreen() {
                   : "#005386"
               }
             />
-
             <View
               style={
                 styles.photoButtonTexts
@@ -989,7 +854,6 @@ export default function DenunciaScreen() {
               <Text
                 style={[
                   styles.photosButtonText,
-
                   images.length >=
                     LIMITE_IMAGENS && {
                     color:
@@ -1005,23 +869,18 @@ export default function DenunciaScreen() {
                     ? "Limite de imagens atingido"
                     : "Adicionar mais imagens"}
               </Text>
-
               <Text
                 style={
                   styles.photosButtonSubtext
                 }
               >
-                Fotos podem ajudar
-                na análise da
-                denúncia
+                JPG, PNG ou WEBP — até 5 MB por imagem
               </Text>
             </View>
           </TouchableOpacity>
-
           {/* ================================================== */}
           {/* CARROSSEL */}
           {/* ================================================== */}
-
           {images.length > 0 && (
             <>
               <View
@@ -1063,9 +922,7 @@ export default function DenunciaScreen() {
                           }
                           resizeMode="cover"
                         />
-
                         {/* EVIDÊNCIA */}
-
                         <View
                           style={
                             styles.evidenceBadge
@@ -1076,7 +933,6 @@ export default function DenunciaScreen() {
                             size={13}
                             color="#FFFFFF"
                           />
-
                           <Text
                             style={
                               styles.evidenceBadgeText
@@ -1087,9 +943,7 @@ export default function DenunciaScreen() {
                               1}
                           </Text>
                         </View>
-
                         {/* REMOVER */}
-
                         <TouchableOpacity
                           style={
                             styles.removeImageButton
@@ -1113,9 +967,7 @@ export default function DenunciaScreen() {
                     )
                   )}
                 </ScrollView>
-
                 {/* ESQUERDA */}
-
                 {imagemAtual >
                   0 && (
                   <TouchableOpacity
@@ -1137,9 +989,7 @@ export default function DenunciaScreen() {
                     />
                   </TouchableOpacity>
                 )}
-
                 {/* DIREITA */}
-
                 {imagemAtual <
                   images.length -
                     1 && (
@@ -1162,9 +1012,7 @@ export default function DenunciaScreen() {
                     />
                   </TouchableOpacity>
                 )}
-
                 {/* CONTADOR */}
-
                 <View
                   style={
                     styles.slideCounter
@@ -1182,9 +1030,7 @@ export default function DenunciaScreen() {
                   </Text>
                 </View>
               </View>
-
               {/* BOLINHAS */}
-
               {images.length >
                 1 && (
                 <View
@@ -1201,7 +1047,6 @@ export default function DenunciaScreen() {
                         key={index}
                         style={[
                           styles.paginationDot,
-
                           index ===
                             imagemAtual &&
                             styles.paginationDotActive,
@@ -1214,15 +1059,12 @@ export default function DenunciaScreen() {
             </>
           )}
         </View>
-
         {/* ==================================================== */}
         {/* ENVIAR DENÚNCIA */}
         {/* ==================================================== */}
-
         <TouchableOpacity
           style={[
             styles.reportButton,
-
             loading && {
               opacity: 0.7,
             },
@@ -1245,7 +1087,6 @@ export default function DenunciaScreen() {
                 size={18}
                 color="#FFFFFF"
               />
-
               <Text
                 style={
                   styles.reportButtonText
@@ -1256,7 +1097,6 @@ export default function DenunciaScreen() {
             </>
           )}
         </TouchableOpacity>
-
         <Text
           style={
             styles.footerHelpText
@@ -1267,11 +1107,9 @@ export default function DenunciaScreen() {
           responsável.
         </Text>
       </ScrollView>
-
       {/* ====================================================== */}
       {/* MODAL DE CATEGORIA */}
       {/* ====================================================== */}
-
       <Modal
         visible={
           categoryModalVisible
@@ -1299,7 +1137,6 @@ export default function DenunciaScreen() {
                 styles.modalHandle
               }
             />
-
             <Text
               style={
                 styles.modalTitle
@@ -1307,7 +1144,6 @@ export default function DenunciaScreen() {
             >
               Motivo da denúncia
             </Text>
-
             <Text
               style={
                 styles.modalSubtitle
@@ -1317,19 +1153,16 @@ export default function DenunciaScreen() {
               melhor representa o
               que aconteceu.
             </Text>
-
             {categories.map(
               (item) => {
                 const selecionado =
                   selectedCategory ===
                   item.nome;
-
                 return (
                   <TouchableOpacity
                     key={item.id}
                     style={[
                       styles.modalItem,
-
                       selecionado &&
                         styles.modalItemSelected,
                     ]}
@@ -1337,7 +1170,6 @@ export default function DenunciaScreen() {
                       setSelectedCategory(
                         item.nome
                       );
-
                       setCategoryModalVisible(
                         false
                       );
@@ -1354,14 +1186,12 @@ export default function DenunciaScreen() {
                       <Text
                         style={[
                           styles.modalItemText,
-
                           selecionado &&
                             styles.modalItemTextSelected,
                         ]}
                       >
                         {item.nome}
                       </Text>
-
                       <Text
                         style={
                           styles.modalItemDescription
@@ -1372,7 +1202,6 @@ export default function DenunciaScreen() {
                         }
                       </Text>
                     </View>
-
                     {selecionado && (
                       <Feather
                         name="check-circle"
@@ -1384,7 +1213,6 @@ export default function DenunciaScreen() {
                 );
               }
             )}
-
             <TouchableOpacity
               style={
                 styles.modalCloseButton
@@ -1406,11 +1234,9 @@ export default function DenunciaScreen() {
           </View>
         </View>
       </Modal>
-
       {/* ====================================================== */}
       {/* MODAL DE SUCESSO */}
       {/* ====================================================== */}
-
       <Modal
         animationType="fade"
         transparent
@@ -1444,7 +1270,6 @@ export default function DenunciaScreen() {
                 color="#FFFFFF"
               />
             </View>
-
             <Text
               style={
                 styles.successModalTitle
@@ -1452,21 +1277,13 @@ export default function DenunciaScreen() {
             >
               Denúncia registrada
             </Text>
-
             <Text
               style={
                 styles.successModalSubtitle
               }
             >
-              A denúncia foi
-              preparada com sucesso.
-              Quando a integração
-              com o sistema estiver
-              pronta, ela será
-              encaminhada para
-              análise.
+              Sua denúncia foi registrada e está pendente de análise.
             </Text>
-
             <TouchableOpacity
               style={
                 styles.successButton
@@ -1475,7 +1292,6 @@ export default function DenunciaScreen() {
                 setSuccessModalVisible(
                   false
                 );
-
                 if (
                   router.canGoBack()
                 ) {
@@ -1498,11 +1314,9 @@ export default function DenunciaScreen() {
           </View>
         </View>
       </Modal>
-
       {/* ====================================================== */}
       {/* MODAL DE ERRO */}
       {/* ====================================================== */}
-
       <Modal
         animationType="fade"
         transparent
@@ -1536,7 +1350,6 @@ export default function DenunciaScreen() {
                 color="#E53935"
               />
             </View>
-
             <Text
               style={
                 styles.errorModalTitle
@@ -1545,7 +1358,6 @@ export default function DenunciaScreen() {
               Não foi possível
               continuar
             </Text>
-
             <Text
               style={
                 styles.errorModalSubtitle
@@ -1553,7 +1365,6 @@ export default function DenunciaScreen() {
             >
               {errorMessage}
             </Text>
-
             <TouchableOpacity
               style={
                 styles.errorButton
@@ -1578,32 +1389,26 @@ export default function DenunciaScreen() {
     </SafeAreaView>
   );
 }
-
 /* ================================================================
    ESTILOS
 ================================================================ */
-
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: "#FFFFFF",
   },
-
   container: {
     flex: 1,
     backgroundColor: "#FFFFFF",
   },
-
   content: {
     paddingTop: 18,
     paddingHorizontal: 20,
     paddingBottom: 40,
   },
-
   /* ============================================================
      HEADER
   ============================================================ */
-
   header: {
     height: 58,
     flexDirection: "row",
@@ -1615,7 +1420,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#EEEEEE",
   },
-
   headerButton: {
     width: 40,
     height: 40,
@@ -1623,22 +1427,18 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-
   headerTitle: {
     fontFamily:
       "Montserrat_700Bold",
     fontSize: 16,
     color: "#005386",
   },
-
   headerPlaceholder: {
     width: 40,
   },
-
   /* ============================================================
      TÍTULOS
   ============================================================ */
-
   mainTitle: {
     fontFamily:
       "Montserrat_700Bold",
@@ -1646,7 +1446,6 @@ const styles = StyleSheet.create({
     color: "#005386",
     marginBottom: 4,
   },
-
   mainSubtitle: {
     fontFamily:
       "Montserrat_400Regular",
@@ -1655,11 +1454,9 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     lineHeight: 20,
   },
-
   /* ============================================================
      USUÁRIO DENUNCIADO
   ============================================================ */
-
   reportedUserCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -1670,18 +1467,14 @@ const styles = StyleSheet.create({
     padding: 13,
     marginBottom: 14,
   },
-
   /* FOTO REAL */
-
   reportedUserPhoto: {
     width: 44,
     height: 44,
     borderRadius: 22,
     backgroundColor: "#E4F8FF",
   },
-
   /* FALLBACK SEM FOTO */
-
   reportedUserIcon: {
     width: 44,
     height: 44,
@@ -1690,19 +1483,16 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-
   reportedUserInfo: {
     flex: 1,
     marginLeft: 11,
   },
-
   reportedUserLabel: {
     fontFamily:
       "Montserrat_400Regular",
     fontSize: 10,
     color: "#777777",
   },
-
   reportedUserName: {
     fontFamily:
       "Montserrat_600SemiBold",
@@ -1710,11 +1500,9 @@ const styles = StyleSheet.create({
     color: "#005386",
     marginTop: 2,
   },
-
   /* ============================================================
      AVISO
   ============================================================ */
-
   noticeCard: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -1724,7 +1512,6 @@ const styles = StyleSheet.create({
     marginBottom: 22,
     gap: 9,
   },
-
   noticeText: {
     flex: 1,
     fontFamily:
@@ -1733,22 +1520,18 @@ const styles = StyleSheet.create({
     color: "#005386",
     lineHeight: 18,
   },
-
   /* ============================================================
      CAMPOS
   ============================================================ */
-
   fieldGroup: {
     marginBottom: 5,
   },
-
   labelRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent:
       "space-between",
   },
-
   label: {
     fontFamily:
       "Montserrat_600SemiBold",
@@ -1756,7 +1539,6 @@ const styles = StyleSheet.create({
     color: "#333333",
     marginBottom: 8,
   },
-
   characterCounter: {
     fontFamily:
       "Montserrat_400Regular",
@@ -1764,7 +1546,6 @@ const styles = StyleSheet.create({
     color: "#888888",
     marginBottom: 8,
   },
-
   input: {
     backgroundColor: "#FFFFFF",
     borderRadius: 15,
@@ -1777,14 +1558,12 @@ const styles = StyleSheet.create({
     color: "#333333",
     marginBottom: 16,
   },
-
   textArea: {
     height: 135,
     paddingTop: 12,
     paddingBottom: 12,
     textAlignVertical: "top",
   },
-
   inputPicker: {
     flexDirection: "row",
     justifyContent:
@@ -1798,7 +1577,6 @@ const styles = StyleSheet.create({
     borderColor: "#0099FF",
     marginBottom: 18,
   },
-
   inputText: {
     flex: 1,
     fontFamily:
@@ -1807,7 +1585,6 @@ const styles = StyleSheet.create({
     color: "#333333",
     marginRight: 8,
   },
-
   inputPlaceholder: {
     flex: 1,
     fontFamily:
@@ -1816,18 +1593,15 @@ const styles = StyleSheet.create({
     color: "#777777",
     marginRight: 8,
   },
-
   /* ============================================================
      IMAGENS
   ============================================================ */
-
   imagesTitleRow: {
     flexDirection: "row",
     justifyContent:
       "space-between",
     alignItems: "flex-start",
   },
-
   optionalText: {
     fontFamily:
       "Montserrat_400Regular",
@@ -1836,7 +1610,6 @@ const styles = StyleSheet.create({
     marginTop: -5,
     marginBottom: 8,
   },
-
   imageCounterTop: {
     fontFamily:
       "Montserrat_600SemiBold",
@@ -1844,7 +1617,6 @@ const styles = StyleSheet.create({
     color: "#005386",
     marginTop: 2,
   },
-
   photosButton: {
     backgroundColor: "#F5FBFF",
     borderWidth: 1,
@@ -1857,24 +1629,20 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     flexDirection: "row",
   },
-
   photosButtonDisabled: {
     backgroundColor: "#EEEEEE",
     borderColor: "#CCCCCC",
   },
-
   photoButtonTexts: {
     flex: 1,
     marginLeft: 10,
   },
-
   photosButtonText: {
     fontFamily:
       "Montserrat_600SemiBold",
     fontSize: 13,
     color: "#005386",
   },
-
   photosButtonSubtext: {
     fontFamily:
       "Montserrat_400Regular",
@@ -1882,7 +1650,6 @@ const styles = StyleSheet.create({
     color: "#777777",
     marginTop: 2,
   },
-
   carouselContainer: {
     position: "relative",
     width: SCREEN_WIDTH - 40,
@@ -1893,20 +1660,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#0099FF",
   },
-
   imageSlide: {
     width: SCREEN_WIDTH - 40,
     height: 220,
     position: "relative",
     backgroundColor: "#EEEEEE",
   },
-
   imagePreview: {
     width: "100%",
     height: "100%",
     backgroundColor: "#E1E1E1",
   },
-
   evidenceBadge: {
     position: "absolute",
     top: 12,
@@ -1920,14 +1684,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 5,
   },
-
   evidenceBadgeText: {
     fontFamily:
       "Montserrat_600SemiBold",
     fontSize: 11,
     color: "#FFFFFF",
   },
-
   removeImageButton: {
     position: "absolute",
     top: 10,
@@ -1942,7 +1704,6 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: "#FFFFFF",
   },
-
   carouselArrow: {
     position: "absolute",
     top: "50%",
@@ -1955,15 +1716,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-
   carouselArrowLeft: {
     left: 10,
   },
-
   carouselArrowRight: {
     right: 10,
   },
-
   slideCounter: {
     position: "absolute",
     bottom: 10,
@@ -1974,14 +1732,12 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: 15,
   },
-
   slideCounterText: {
     fontFamily:
       "Montserrat_600SemiBold",
     fontSize: 12,
     color: "#FFFFFF",
   },
-
   pagination: {
     flexDirection: "row",
     justifyContent: "center",
@@ -1990,25 +1746,21 @@ const styles = StyleSheet.create({
     marginBottom: 15,
     gap: 6,
   },
-
   paginationDot: {
     width: 7,
     height: 7,
     borderRadius: 4,
     backgroundColor: "#CCCCCC",
   },
-
   paginationDotActive: {
     width: 9,
     height: 9,
     borderRadius: 5,
     backgroundColor: "#005386",
   },
-
   /* ============================================================
      BOTÃO DENUNCIAR
   ============================================================ */
-
   reportButton: {
     backgroundColor: "#D9534F",
     borderRadius: 8,
@@ -2020,14 +1772,12 @@ const styles = StyleSheet.create({
     gap: 8,
     elevation: 2,
   },
-
   reportButtonText: {
     fontFamily:
       "Montserrat_700Bold",
     fontSize: 15,
     color: "#FFFFFF",
   },
-
   footerHelpText: {
     fontFamily:
       "Montserrat_400Regular",
@@ -2036,18 +1786,15 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 10,
   },
-
   /* ============================================================
      MODAL CATEGORIA
   ============================================================ */
-
   modalOverlay: {
     flex: 1,
     backgroundColor:
       "rgba(0,0,0,0.5)",
     justifyContent: "flex-end",
   },
-
   modalContainer: {
     backgroundColor: "#FFFFFF",
     borderTopLeftRadius: 20,
@@ -2056,7 +1803,6 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     paddingBottom: 35,
   },
-
   modalHandle: {
     width: 45,
     height: 4,
@@ -2065,7 +1811,6 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     marginBottom: 15,
   },
-
   modalTitle: {
     fontFamily:
       "Montserrat_700Bold",
@@ -2074,7 +1819,6 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     textAlign: "center",
   },
-
   modalSubtitle: {
     fontFamily:
       "Montserrat_400Regular",
@@ -2084,7 +1828,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 15,
   },
-
   modalItem: {
     minHeight: 59,
     borderBottomWidth: 1,
@@ -2094,27 +1837,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 5,
     paddingVertical: 9,
   },
-
   modalItemSelected: {
     backgroundColor: "#F5FBFF",
   },
-
   modalItemContent: {
     flex: 1,
     marginRight: 10,
   },
-
   modalItemText: {
     fontFamily:
       "Montserrat_600SemiBold",
     fontSize: 13,
     color: "#444444",
   },
-
   modalItemTextSelected: {
     color: "#005386",
   },
-
   modalItemDescription: {
     fontFamily:
       "Montserrat_400Regular",
@@ -2123,7 +1861,6 @@ const styles = StyleSheet.create({
     marginTop: 3,
     lineHeight: 15,
   },
-
   modalCloseButton: {
     marginTop: 16,
     backgroundColor: "#F5F5F5",
@@ -2131,18 +1868,15 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: "center",
   },
-
   modalCloseButtonText: {
     fontFamily:
       "Montserrat_600SemiBold",
     fontSize: 14,
     color: "#2E70B4",
   },
-
   /* ============================================================
      MODAIS DE RESULTADO
   ============================================================ */
-
   profileModalOverlay: {
     flex: 1,
     backgroundColor:
@@ -2151,7 +1885,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: 24,
   },
-
   profileModalContent: {
     width: "100%",
     maxWidth: 400,
@@ -2168,7 +1901,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 4,
   },
-
   successIcon: {
     width: 62,
     height: 62,
@@ -2178,7 +1910,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 16,
   },
-
   successModalTitle: {
     fontFamily:
       "Montserrat_700Bold",
@@ -2187,7 +1918,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 8,
   },
-
   successModalSubtitle: {
     fontFamily:
       "Montserrat_400Regular",
@@ -2197,7 +1927,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 22,
   },
-
   successButton: {
     width: "100%",
     minHeight: 44,
@@ -2206,14 +1935,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-
   successButtonText: {
     fontFamily:
       "Montserrat_700Bold",
     fontSize: 14,
     color: "#FFFFFF",
   },
-
   errorIcon: {
     width: 62,
     height: 62,
@@ -2223,7 +1950,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 16,
   },
-
   errorModalTitle: {
     fontFamily:
       "Montserrat_700Bold",
@@ -2232,7 +1958,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 8,
   },
-
   errorModalSubtitle: {
     fontFamily:
       "Montserrat_400Regular",
@@ -2242,7 +1967,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 22,
   },
-
   errorButton: {
     width: "100%",
     minHeight: 44,
@@ -2251,7 +1975,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-
   errorButtonText: {
     fontFamily:
       "Montserrat_700Bold",

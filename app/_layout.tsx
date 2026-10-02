@@ -7,6 +7,7 @@ import {
 } from "@expo-google-fonts/montserrat";
 import { Feather } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { LinearGradient } from "expo-linear-gradient";
 import { Slot, useRouter, useSegments } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -47,6 +48,7 @@ export default function Layout() {
         duration: 700,
         useNativeDriver: true,
       }),
+
       Animated.spring(scale, {
         toValue: 1,
         friction: 7,
@@ -194,6 +196,7 @@ export default function Layout() {
             },
           ]}
         >
+          {/* INÍCIO */}
           <TouchableOpacity
             style={styles.navItem}
             onPress={() =>
@@ -212,6 +215,7 @@ export default function Layout() {
             />
           </TouchableOpacity>
 
+          {/* MENSAGENS */}
           <TouchableOpacity
             style={styles.navItem}
             onPress={() =>
@@ -230,6 +234,7 @@ export default function Layout() {
             />
           </TouchableOpacity>
 
+          {/* ANUNCIAR */}
           <TouchableOpacity
             style={styles.navItemCenter}
             onPress={() =>
@@ -239,13 +244,36 @@ export default function Layout() {
             }
             activeOpacity={0.8}
           >
-            <Feather
-              name="plus"
-              size={26}
-              color="#FFFFFF"
-            />
+            <LinearGradient
+              colors={[
+                "#003B66",
+                "#005386",
+                "#0099FF",
+              ]}
+              locations={[
+                0,
+                0.45,
+                1,
+              ]}
+              start={{
+                x: 0,
+                y: 1,
+              }}
+              end={{
+                x: 1,
+                y: 0,
+              }}
+              style={styles.announceButton}
+            >
+              <Feather
+                name="plus"
+                size={28}
+                color="#FFFFFF"
+              />
+            </LinearGradient>
           </TouchableOpacity>
 
+          {/* TROCAS */}
           <TouchableOpacity
             style={styles.navItem}
             onPress={() =>
@@ -264,6 +292,7 @@ export default function Layout() {
             />
           </TouchableOpacity>
 
+          {/* PERFIL */}
           <TouchableOpacity
             style={styles.navItem}
             onPress={() =>
@@ -324,6 +353,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderTopWidth: 1,
     borderTopColor: "#EEEEEE",
+    overflow: "visible",
   },
 
   navItem: {
@@ -334,11 +364,33 @@ const styles = StyleSheet.create({
   },
 
   navItemCenter: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#005386",
+    flex: 1,
+    height: 60,
     justifyContent: "center",
     alignItems: "center",
+    position: "relative",
+    overflow: "visible",
+  },
+
+  announceButton: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+
+    justifyContent: "center",
+    alignItems: "center",
+
+    position: "absolute",
+    top: -15,
+
+    shadowColor: "#005386",
+    shadowOffset: {
+      width: 0,
+      height: 5,
+    },
+    shadowOpacity: 0.30,
+    shadowRadius: 9,
+
+    elevation: 7,
   },
 });

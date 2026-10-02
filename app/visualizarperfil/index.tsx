@@ -988,7 +988,7 @@ export default function VisualizarPerfilScreen() {
               <Feather
                 name="flag"
                 size={21}
-                color="#D97706"
+                color="#D9534F"
               />
             </TouchableOpacity>
 
@@ -1019,7 +1019,7 @@ export default function VisualizarPerfilScreen() {
               ) : (
                 <MaterialCommunityIcons
                   name="block-helper"
-                  size={23}
+                  size={21}
                   color="#D9534F"
                 />
               )}
