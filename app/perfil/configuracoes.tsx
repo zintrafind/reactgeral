@@ -1,0 +1,1701 @@
+import React, { useEffect, useState } from "react";
+
+import {
+
+  Alert,
+
+  Modal,
+
+  Pressable,
+
+  ScrollView,
+
+  StyleSheet,
+
+  Text,
+
+  TouchableOpacity,
+
+  View,
+
+} from "react-native";
+
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+import { router } from "expo-router";
+
+import {
+
+  AntDesign,
+
+  Feather,
+
+  FontAwesome5,
+
+  Ionicons,
+
+  MaterialIcons,
+
+} from "@expo/vector-icons";
+
+import api from "../../services/api.js";
+
+export default function Configuracoes() {
+
+  const [usuario, setUsuario] = useState<any>(null);
+
+  // ============================================================
+  // DISPONIBILIDADE DO PERFIL — SOMENTE FRONT-END
+  // ============================================================
+  const [perfilDisponivel, setPerfilDisponivel] = useState(true);
+  const [modalDisponibilidade, setModalDisponibilidade] = useState(false);
+
+  const [modalExcluir, setModalExcluir] = useState(false);
+
+  const [excluindo, setExcluindo] = useState(false);
+
+  const [modalLogout, setModalLogout] = useState(false);
+
+  const [saindo, setSaindo] = useState(false);
+
+  // ============================================================
+
+  // CARREGAR USUÁRIO
+
+  // ============================================================
+
+  useEffect(() => {
+
+    carregarUsuario();
+
+  }, []);
+
+  async function carregarUsuario() {
+
+    try {
+
+      const dados = await AsyncStorage.getItem("usuario");
+
+      if (dados) {
+
+        const usuarioSalvo = JSON.parse(dados);
+
+        console.log("Usuário carregado:", usuarioSalvo);
+
+        setUsuario(usuarioSalvo);
+
+      }
+
+    
+      const statusPerfil = await AsyncStorage.getItem("@pecapeca:perfil_disponivel");
+
+      if (statusPerfil !== null) {
+        setPerfilDisponivel(statusPerfil === "true");
+      }
+
+    } catch (erro) {
+
+      console.log(
+
+        "Erro ao carregar usuário:",
+
+        erro
+
+      );
+
+    }
+
+  }
+
+  // ============================================================
+  // ALTERAR DISPONIBILIDADE DO PERFIL — SOMENTE FRONT-END
+  // ============================================================
+
+  async function confirmarDisponibilidadePerfil() {
+    const novoStatus = !perfilDisponivel;
+
+    setPerfilDisponivel(novoStatus);
+    setModalDisponibilidade(false);
+
+    // Persistência apenas local do front-end.
+    // Não altera o perfil no servidor.
+    await AsyncStorage.setItem(
+      "@pecapeca:perfil_disponivel",
+      String(novoStatus)
+    );
+  }
+
+  // ============================================================
+
+  // ABRIR CONFIRMAÇÃO DE EXCLUSÃO
+
+  // ============================================================
+
+  function abrirConfirmacaoExclusao() {
+
+    console.log(
+
+      "BOTÃO EXCLUIR CONTA CLICADO"
+
+    );
+
+    setModalExcluir(true);
+
+  }
+
+  // ============================================================
+
+  // EXCLUIR CONTA
+
+  // ============================================================
+
+  async function excluirConta() {
+
+    if (!usuario?.id_usuario) {
+
+      console.log(
+
+        "ERRO: id_usuario não encontrado."
+
+      );
+
+      setModalExcluir(false);
+
+      Alert.alert(
+
+        "Erro",
+
+        "Não foi possível identificar o usuário."
+
+      );
+
+      return;
+
+    }
+
+    try {
+
+      setExcluindo(true);
+
+      console.log(
+
+        "Excluindo usuário:",
+
+        usuario.id_usuario
+
+      );
+
+      const token =
+
+        await AsyncStorage.getItem("token");
+
+      const resposta = await api.delete(
+
+        `/users/${usuario.id_usuario}`,
+
+        {
+
+          headers: {
+
+            Accept: "application/json",
+
+            ...(token
+
+              ? {
+
+                  Authorization: `Bearer ${token}`,
+
+                }
+
+              : {}),
+
+          },
+
+        }
+
+      );
+
+      const dados = resposta.data;
+
+      console.log(
+
+        "Resposta da API:",
+
+        dados
+
+      );
+
+      // ========================================================
+
+      // EXCLUSÃO REALIZADA
+
+      // ========================================================
+
+      console.log(
+
+        "Conta excluída com sucesso!"
+
+      );
+
+      await AsyncStorage.removeItem(
+
+        "usuario"
+
+      );
+
+      await AsyncStorage.removeItem(
+
+        "token"
+
+      );
+
+      setUsuario(null);
+
+      setExcluindo(false);
+
+      setModalExcluir(false);
+
+      router.replace(
+
+        "/(auth)/login" as any
+
+      );
+
+    } catch (erro: any) {
+
+      console.log(
+
+        "Erro ao conectar com a API:",
+
+        erro
+
+      );
+
+      const mensagem =
+
+        erro?.response?.data?.message ||
+
+        "Não foi possível excluir sua conta.";
+
+      setExcluindo(false);
+
+      setModalExcluir(false);
+
+      Alert.alert(
+
+        "Erro",
+
+        mensagem
+
+      );
+
+    }
+
+  }
+
+  // ============================================================
+
+  // ABRIR CONFIRMAÇÃO DE LOGOUT
+
+  // ============================================================
+
+  function abrirConfirmacaoLogout() {
+
+    console.log(
+
+      "BOTÃO SAIR DA CONTA CLICADO"
+
+    );
+
+    setModalLogout(true);
+
+  }
+
+  // ============================================================
+
+  // SAIR DA CONTA
+
+  // ============================================================
+
+  async function sairDaConta() {
+
+    try {
+
+      setSaindo(true);
+
+      const token =
+
+        await AsyncStorage.getItem("token");
+
+      console.log(
+
+        "Realizando logout..."
+
+      );
+
+      // ========================================================
+
+      // TENTA ENCERRAR A SESSÃO NA API
+
+      // ========================================================
+
+      if (token) {
+
+        try {
+
+          await api.post(
+
+            "/logout",
+
+            {},
+
+            {
+
+              headers: {
+
+                Accept: "application/json",
+
+                Authorization: `Bearer ${token}`,
+
+              },
+
+            }
+
+          );
+
+        } catch (erro) {
+
+          console.log(
+
+            "Erro ao comunicar logout com a API:",
+
+            erro
+
+          );
+
+        }
+
+      }
+
+      // ========================================================
+
+      // REMOVE OS DADOS LOCAIS
+
+      // ========================================================
+
+      await AsyncStorage.removeItem(
+
+        "token"
+
+      );
+
+      await AsyncStorage.removeItem(
+
+        "usuario"
+
+      );
+
+      console.log(
+
+        "Sessão encerrada."
+
+      );
+
+      setSaindo(false);
+
+      setModalLogout(false);
+
+      // ========================================================
+
+      // VAI PARA O LOGIN
+
+      // ========================================================
+
+      router.replace(
+
+        "/(auth)/login" as any
+
+      );
+
+    } catch (erro) {
+
+      console.log(
+
+        "Erro ao sair da conta:",
+
+        erro
+
+      );
+
+      setSaindo(false);
+
+      setModalLogout(false);
+
+      Alert.alert(
+
+        "Erro",
+
+        "Não foi possível sair da conta."
+
+      );
+
+    }
+
+  }
+
+  return (
+
+    <View style={styles.container}>
+
+      <ScrollView
+
+        style={styles.scrollView}
+
+        contentContainerStyle={
+
+          styles.scrollContent
+
+        }
+
+        showsVerticalScrollIndicator={false}
+
+      >
+
+        {/* VOLTAR */}
+
+        <TouchableOpacity
+
+          style={styles.backButton}
+
+          onPress={() => router.back()}
+
+          activeOpacity={0.7}
+
+        >
+
+          <AntDesign
+
+            name="left"
+
+            size={22}
+
+            color="#005386"
+
+          />
+
+        </TouchableOpacity>
+
+        {/* TÍTULO */}
+
+        <Text style={styles.title}>
+
+          Configurações
+
+        </Text>
+
+        {/* EDITAR PERFIL */}
+
+        <TouchableOpacity
+
+          style={styles.menuItem}
+
+          onPress={() =>
+
+            router.push(
+
+              "/perfil/editarPerfil" as any
+
+            )
+
+          }
+
+          activeOpacity={0.7}
+
+        >
+
+          <MaterialIcons
+
+            name="person-outline"
+
+            size={24}
+
+            color="#005386"
+
+          />
+
+          <Text style={styles.menuText}>
+
+            Editar Perfil
+
+          </Text>
+
+          <AntDesign
+
+            name="right"
+
+            size={18}
+
+            color="#0099FF"
+
+          />
+
+        </TouchableOpacity>
+
+        {/* editar Dados Pessoais */}
+
+        <TouchableOpacity
+
+          style={styles.menuItem}
+
+          onPress={() =>
+
+            router.push(
+
+              "/perfil/editarDadosPessoais" as any
+
+            )
+
+          }
+
+        >
+
+          <MaterialIcons
+
+            name="lock-outline"
+
+            size={24}
+
+            color="#005386"
+
+          />
+
+          <Text style={styles.menuText}>
+
+            Editar Dados Pessoais
+
+          </Text>
+
+          <AntDesign
+
+            name="right"
+
+            size={18}
+
+            color="#0099FF"
+
+          />
+
+        </TouchableOpacity>
+
+        {/* DISPONIBILIDADE DO PERFIL */}
+        <TouchableOpacity
+          style={styles.menuItem}
+          onPress={() => setModalDisponibilidade(true)}
+          activeOpacity={0.7}
+        >
+          <Feather
+            name={perfilDisponivel ? "check-circle" : "slash"}
+            size={23}
+            color={perfilDisponivel ? "#28A745" : "#E53935"}
+          />
+
+          <View style={styles.disponibilidadeInfo}>
+            <Text style={styles.menuTextSemMargem}>
+              Disponibilidade do Perfil
+            </Text>
+
+            <Text
+              style={[
+                styles.disponibilidadeStatus,
+                { color: perfilDisponivel ? "#28A745" : "#E53935" },
+              ]}
+            >
+              {perfilDisponivel ? "Disponível para trocas" : "Perfil indisponível"}
+            </Text>
+          </View>
+
+          <View
+            style={[
+              styles.statusIndicador,
+              perfilDisponivel
+                ? styles.statusIndicadorDisponivel
+                : styles.statusIndicadorIndisponivel,
+            ]}
+          />
+        </TouchableOpacity>
+
+        {/* NOTIFICAÇÕES */}
+
+        <TouchableOpacity
+
+          style={styles.menuItem}
+
+          activeOpacity={0.7}
+
+        >
+
+          <Ionicons
+
+            name="notifications-outline"
+
+            size={24}
+
+            color="#005386"
+
+          />
+
+          <Text style={styles.menuText}>
+
+            Configuração de Notificações
+
+          </Text>
+
+          <AntDesign
+
+            name="right"
+
+            size={18}
+
+            color="#0099FF"
+
+          />
+
+        </TouchableOpacity>
+
+        {/* HISTÓRICO DE TROCAS */}
+
+        <TouchableOpacity
+
+          style={styles.menuItem}
+
+          activeOpacity={0.7}
+
+        >
+
+          <FontAwesome5
+
+            name="exchange-alt"
+
+            size={20}
+
+            color="#005386"
+
+          />
+
+          <Text style={styles.menuText}>
+
+            Histórico de Trocas
+
+          </Text>
+
+          <AntDesign
+
+            name="right"
+
+            size={18}
+
+            color="#0099FF"
+
+          />
+
+        </TouchableOpacity>
+
+        {/* PEÇAS FAVORITAS */}
+
+        <TouchableOpacity
+
+          style={styles.menuItem}
+
+          onPress={() =>
+
+            router.push(
+
+              "/favoritos"
+
+            )
+
+          }
+
+          activeOpacity={0.7}
+
+        >
+
+          <MaterialIcons
+
+         name="star-outline"
+
+         size={24}
+
+         color="#005386"
+
+/>
+
+          <Text style={styles.menuText}>
+
+            Peças Favoritas
+
+          </Text>
+
+          <AntDesign
+
+            name="right"
+
+            size={18}
+
+            color="#0099FF"
+
+          />
+
+        </TouchableOpacity>
+
+        {/* USUÁRIOS BLOQUEADOS */}
+
+        <TouchableOpacity
+
+          style={styles.menuItem}
+
+          onPress={() =>
+
+            router.push(
+
+              "/perfil/usuariosBloqueados" as any
+
+            )
+
+          }
+
+          activeOpacity={0.7}
+
+        >
+
+          <Ionicons
+
+            name="ban-outline"
+
+            size={23}
+
+            color="#005386"
+
+          />
+
+          <Text style={styles.menuText}>
+
+            Usuários Bloqueados
+
+          </Text>
+
+          <AntDesign
+
+            name="right"
+
+            size={18}
+
+            color="#0099FF"
+
+          />
+
+        </TouchableOpacity>
+
+        {/* AJUDA */}
+
+        <TouchableOpacity
+
+          style={styles.menuItem}
+
+          activeOpacity={0.7}
+
+        >
+
+          <Feather
+
+            name="help-circle"
+
+            size={23}
+
+            color="#005386"
+
+          />
+
+          <Text style={styles.menuText}>
+
+            Ajuda
+
+          </Text>
+
+          <AntDesign
+
+            name="right"
+
+            size={18}
+
+            color="#0099FF"
+
+          />
+
+        </TouchableOpacity>
+
+        {/* SAIR DA CONTA */}
+
+        <Pressable
+
+          style={({ pressed }) => [
+
+            styles.menuItem,
+
+            pressed &&
+
+              styles.logoutButtonPressed,
+
+          ]}
+
+          onPress={abrirConfirmacaoLogout}
+
+        >
+
+          <MaterialIcons
+
+            name="logout"
+
+            size={23}
+
+            color="#005386"
+
+          />
+
+          <Text style={styles.logoutText}>
+
+            Sair da Conta
+
+          </Text>
+
+          <AntDesign
+
+            name="right"
+
+            size={18}
+
+            color="#0099FF"
+
+          />
+
+        </Pressable>
+
+        {/* EXCLUIR CONTA */}
+
+        <Pressable
+
+          style={({ pressed }) => [
+
+            styles.menuItem,
+
+            styles.deleteMenuItem,
+
+            pressed &&
+
+              styles.deleteButtonPressed,
+
+          ]}
+
+          onPress={abrirConfirmacaoExclusao}
+
+        >
+
+          <MaterialIcons
+
+            name="delete-outline"
+
+            size={23}
+
+            color="#E53935"
+
+          />
+
+          <Text style={styles.deleteText}>
+
+            Excluir Conta
+
+          </Text>
+
+        </Pressable>
+
+      </ScrollView>
+
+      {/* MODAL — DISPONIBILIDADE DO PERFIL */}
+      <Modal
+        visible={modalDisponibilidade}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setModalDisponibilidade(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View
+              style={[
+                styles.disponibilidadeModalIcon,
+                perfilDisponivel
+                  ? styles.disponibilidadeModalIconIndisponivel
+                  : styles.disponibilidadeModalIconDisponivel,
+              ]}
+            >
+              <Feather
+                name={perfilDisponivel ? "slash" : "check-circle"}
+                size={32}
+                color={perfilDisponivel ? "#E53935" : "#28A745"}
+              />
+            </View>
+
+            <Text style={styles.modalTitle}>
+              {perfilDisponivel
+                ? "Marcar perfil como indisponível?"
+                : "Marcar perfil como disponível?"}
+            </Text>
+
+            <Text style={styles.modalText}>
+              {perfilDisponivel
+                ? "Seu perfil será exibido como indisponível para trocas."
+                : "Seu perfil voltará a ser exibido como disponível para trocas."}
+            </Text>
+
+            <View style={styles.modalButtons}>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.cancelButton,
+                  pressed && styles.buttonPressed,
+                ]}
+                onPress={() => setModalDisponibilidade(false)}
+              >
+                <Text style={styles.cancelButtonText}>Cancelar</Text>
+              </Pressable>
+
+              <Pressable
+                style={({ pressed }) => [
+                  styles.disponibilidadeConfirmButton,
+                  pressed && styles.buttonPressed,
+                ]}
+                onPress={confirmarDisponibilidadePerfil}
+              >
+                <Text style={styles.disponibilidadeConfirmButtonText}>
+                  Confirmar
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODAL — SAIR DA CONTA */}
+
+      <Modal
+
+        visible={modalLogout}
+
+        transparent={true}
+
+        animationType="fade"
+
+        onRequestClose={() => {
+
+          if (!saindo) {
+
+            setModalLogout(false);
+
+          }
+
+        }}
+
+      >
+
+        <View style={styles.modalOverlay}>
+
+          <View
+
+            style={styles.modalContainer}
+
+          >
+
+            <View
+
+              style={styles.logoutModalIcon}
+
+            >
+
+              <MaterialIcons
+
+                name="logout"
+
+                size={34}
+
+                color="#005386"
+
+              />
+
+            </View>
+
+            <Text style={styles.modalTitle}>
+
+              Sair da conta
+
+            </Text>
+
+            <Text style={styles.modalText}>
+
+              Tem certeza que deseja sair
+
+              da sua conta?
+
+            </Text>
+
+            <View style={styles.modalButtons}>
+
+              <Pressable
+
+                style={({ pressed }) => [
+
+                  styles.cancelButton,
+
+                  pressed &&
+
+                    styles.buttonPressed,
+
+                ]}
+
+                disabled={saindo}
+
+                onPress={() => {
+
+                  setModalLogout(false);
+
+                }}
+
+              >
+
+                <Text
+
+                  style={
+
+                    styles.cancelButtonText
+
+                  }
+
+                >
+
+                  Cancelar
+
+                </Text>
+
+              </Pressable>
+
+              <Pressable
+
+                style={({ pressed }) => [
+
+                  styles.logoutConfirmButton,
+
+                  pressed &&
+
+                    styles.buttonPressed,
+
+                ]}
+
+                disabled={saindo}
+
+                onPress={sairDaConta}
+
+              >
+
+                <Text
+
+                  style={
+
+                    styles.logoutConfirmButtonText
+
+                  }
+
+                >
+
+                  {saindo
+
+                    ? "Saindo..."
+
+                    : "Sair"}
+
+                </Text>
+
+              </Pressable>
+
+            </View>
+
+          </View>
+
+        </View>
+
+      </Modal>
+
+      {/* MODAL — EXCLUIR CONTA */}
+
+      <Modal
+
+        visible={modalExcluir}
+
+        transparent={true}
+
+        animationType="fade"
+
+        onRequestClose={() => {
+
+          if (!excluindo) {
+
+            setModalExcluir(false);
+
+          }
+
+        }}
+
+      >
+
+        <View style={styles.modalOverlay}>
+
+          <View
+
+            style={styles.modalContainer}
+
+          >
+
+            <View style={styles.modalIcon}>
+
+              <MaterialIcons
+
+                name="delete-outline"
+
+                size={34}
+
+                color="#E53935"
+
+              />
+
+            </View>
+
+            <Text style={styles.modalTitle}>
+
+              Excluir conta
+
+            </Text>
+
+            <Text style={styles.modalText}>
+
+              Tem certeza que deseja
+
+              excluir sua conta?
+
+            </Text>
+
+            <Text
+
+              style={styles.modalWarning}
+
+            >
+
+              Esta ação não poderá ser
+
+              desfeita.
+
+            </Text>
+
+            <View style={styles.modalButtons}>
+
+              <Pressable
+
+                style={({ pressed }) => [
+
+                  styles.cancelButton,
+
+                  pressed &&
+
+                    styles.buttonPressed,
+
+                ]}
+
+                disabled={excluindo}
+
+                onPress={() => {
+
+                  console.log(
+
+                    "Exclusão cancelada."
+
+                  );
+
+                  setModalExcluir(false);
+
+                }}
+
+              >
+
+                <Text
+
+                  style={
+
+                    styles.cancelButtonText
+
+                  }
+
+                >
+
+                  Cancelar
+
+                </Text>
+
+              </Pressable>
+
+              <Pressable
+
+                style={({ pressed }) => [
+
+                  styles.confirmButton,
+
+                  pressed &&
+
+                    styles.buttonPressed,
+
+                ]}
+
+                disabled={excluindo}
+
+                onPress={excluirConta}
+
+              >
+
+                <Text
+
+                  style={
+
+                    styles.confirmButtonText
+
+                  }
+
+                >
+
+                  {excluindo
+
+                    ? "Excluindo..."
+
+                    : "Excluir"}
+
+                </Text>
+
+              </Pressable>
+
+            </View>
+
+          </View>
+
+        </View>
+
+      </Modal>
+
+    </View>
+
+  );
+
+}
+
+const styles = StyleSheet.create({
+
+  container: {
+
+    flex: 1,
+
+    backgroundColor: "#FFFFFF",
+
+  },
+
+  scrollView: {
+
+    flex: 1,
+
+  },
+
+  scrollContent: {
+
+    paddingHorizontal: 25,
+
+    paddingTop: 50,
+
+    paddingBottom: 40,
+
+  },
+
+  backButton: {
+
+    marginBottom: 20,
+
+    alignSelf: "flex-start",
+
+    padding: 3,
+
+  },
+
+  title: {
+
+    fontSize: 28,
+
+    color: "#005386",
+
+    marginBottom: 35,
+
+    fontFamily: "Montserrat_700Bold",
+
+  },
+
+  menuItem: {
+
+    flexDirection: "row",
+
+    alignItems: "center",
+
+    paddingVertical: 18,
+
+    borderBottomWidth: 1,
+
+    borderBottomColor: "#EEEEEE",
+
+    minHeight: 60,
+
+  },
+
+  menuText: {
+
+    flex: 1,
+
+    marginLeft: 15,
+
+    color: "#333333",
+
+    fontSize: 16,
+
+    fontFamily: "Montserrat_400Regular",
+
+  },
+
+  disponibilidadeInfo: {
+    flex: 1,
+    marginLeft: 15,
+  },
+
+  menuTextSemMargem: {
+    color: "#333333",
+    fontSize: 16,
+    fontFamily: "Montserrat_400Regular",
+  },
+
+  disponibilidadeStatus: {
+    fontSize: 12,
+    marginTop: 3,
+    fontFamily: "Montserrat_500Medium",
+  },
+
+  statusIndicador: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+
+  statusIndicadorDisponivel: {
+    backgroundColor: "#28A745",
+  },
+
+  statusIndicadorIndisponivel: {
+    backgroundColor: "#E53935",
+  },
+
+  disponibilidadeModalIcon: {
+    width: 65,
+    height: 65,
+    borderRadius: 32.5,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 15,
+  },
+
+  disponibilidadeModalIconDisponivel: {
+    backgroundColor: "#EAF8EE",
+  },
+
+  disponibilidadeModalIconIndisponivel: {
+    backgroundColor: "#FFEAEA",
+  },
+
+  disponibilidadeConfirmButton: {
+    flex: 1,
+    paddingVertical: 13,
+    borderRadius: 10,
+    backgroundColor: "#0099FF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  disponibilidadeConfirmButtonText: {
+    fontSize: 15,
+    color: "#FFFFFF",
+    fontFamily: "Montserrat_600SemiBold",
+  },
+
+  logoutText: {
+
+    flex: 1,
+
+    marginLeft: 15,
+
+    color: "#005386",
+
+    fontSize: 16,
+
+    fontFamily: "Montserrat_600SemiBold",
+
+  },
+
+  logoutButtonPressed: {
+
+    opacity: 0.5,
+
+  },
+
+  deleteMenuItem: {
+
+    marginTop: 5,
+
+    borderBottomWidth: 0,
+
+    paddingBottom: 20,
+
+  },
+
+  deleteText: {
+
+    flex: 1,
+
+    marginLeft: 15,
+
+    fontSize: 16,
+
+    color: "#E53935",
+
+    fontFamily: "Montserrat_600SemiBold",
+
+  },
+
+  deleteButtonPressed: {
+
+    opacity: 0.5,
+
+  },
+
+  modalOverlay: {
+
+    flex: 1,
+
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+
+    justifyContent: "center",
+
+    alignItems: "center",
+
+    paddingHorizontal: 25,
+
+  },
+
+  modalContainer: {
+
+    width: "100%",
+
+    maxWidth: 400,
+
+    backgroundColor: "#FFFFFF",
+
+    borderRadius: 20,
+
+    padding: 25,
+
+    alignItems: "center",
+
+  },
+
+  modalIcon: {
+
+    width: 65,
+
+    height: 65,
+
+    borderRadius: 32.5,
+
+    backgroundColor: "#FFEAEA",
+
+    justifyContent: "center",
+
+    alignItems: "center",
+
+    marginBottom: 15,
+
+  },
+
+  logoutModalIcon: {
+
+    width: 65,
+
+    height: 65,
+
+    borderRadius: 32.5,
+
+    backgroundColor: "#E4F8FF",
+
+    justifyContent: "center",
+
+    alignItems: "center",
+
+    marginBottom: 15,
+
+  },
+
+  modalTitle: {
+
+    fontSize: 21,
+
+    color: "#333333",
+
+    fontFamily: "Montserrat_700Bold",
+
+    marginBottom: 12,
+
+    textAlign: "center",
+
+  },
+
+  modalText: {
+
+    fontSize: 15,
+
+    color: "#555555",
+
+    fontFamily: "Montserrat_400Regular",
+
+    textAlign: "center",
+
+    lineHeight: 22,
+
+  },
+
+  modalWarning: {
+
+    fontSize: 14,
+
+    color: "#E53935",
+
+    fontFamily: "Montserrat_600SemiBold",
+
+    textAlign: "center",
+
+    marginTop: 8,
+
+    marginBottom: 25,
+
+  },
+
+  modalButtons: {
+
+    width: "100%",
+
+    flexDirection: "row",
+
+    gap: 12,
+
+    marginTop: 25,
+
+  },
+
+  cancelButton: {
+
+    flex: 1,
+
+    paddingVertical: 13,
+
+    borderRadius: 10,
+
+    borderWidth: 1,
+
+    borderColor: "#CCCCCC",
+
+    alignItems: "center",
+
+    justifyContent: "center",
+
+  },
+
+  cancelButtonText: {
+
+    fontSize: 15,
+
+    color: "#555555",
+
+    fontFamily: "Montserrat_600SemiBold",
+
+  },
+
+  confirmButton: {
+
+    flex: 1,
+
+    paddingVertical: 13,
+
+    borderRadius: 10,
+
+    backgroundColor: "#E53935",
+
+    alignItems: "center",
+
+    justifyContent: "center",
+
+  },
+
+  confirmButtonText: {
+
+    fontSize: 15,
+
+    color: "#FFFFFF",
+
+    fontFamily: "Montserrat_600SemiBold",
+
+  },
+
+  logoutConfirmButton: {
+
+    flex: 1,
+
+    paddingVertical: 13,
+
+    borderRadius: 10,
+
+    backgroundColor: "#005386",
+
+    alignItems: "center",
+
+    justifyContent: "center",
+
+  },
+
+  logoutConfirmButtonText: {
+
+    fontSize: 15,
+
+    color: "#FFFFFF",
+
+    fontFamily: "Montserrat_600SemiBold",
+
+  },
+
+  buttonPressed: {
+
+    opacity: 0.6,
+
+  },
+
+});

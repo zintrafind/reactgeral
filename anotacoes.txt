@@ -1,0 +1,324 @@
+============================================================
+                  REACT NATIVE - PEÇA POR PEÇA
+============================================================
+
+Aplicativo mobile do projeto Peça por Peça.
+
+O aplicativo é desenvolvido utilizando:
+
+- React Native
+- Expo
+- Expo Router
+- Axios
+- JavaScript / TypeScript
+- Git / GitHub
+
+
+============================================================
+1. DEPENDÊNCIAS
+============================================================
+
+Dentro da pasta do projeto React:
+
+    npm install
+
+
+============================================================
+2. RODAR O APLICATIVO
+============================================================
+
+Para iniciar o projeto:
+
+    npm start
+
+
+O Expo será iniciado e poderá ser utilizado para executar
+o aplicativo.
+
+
+============================================================
+3. API
+============================================================
+
+O aplicativo React Native se comunica com a API Laravel
+através de requisições HTTP.
+
+A API deve estar funcionando antes de utilizar funções
+que dependem do banco de dados.
+
+
+Para iniciar a API:
+
+    php artisan serve
+
+
+API local:
+
+    http://127.0.0.1:8000
+
+
+============================================================
+4. CONFIGURAÇÃO DO AXIOS
+============================================================
+
+As requisições do aplicativo são feitas através do Axios.
+
+Exemplo:
+
+    import axios from "axios";
+
+    const api = axios.create({
+        baseURL: "http://127.0.0.1:8000/api"
+    });
+
+    export default api;
+
+
+IMPORTANTE:
+
+Quando estiver utilizando um celular físico, o endereço
+127.0.0.1 pode não funcionar.
+
+Nesse caso, utilizar o IP do computador.
+
+Exemplo:
+
+    http://192.168.0.15:8000/api
+
+
+O celular e o computador precisam estar na mesma rede.
+
+
+============================================================
+5. GITHUB - PRIMEIRO ACESSO
+============================================================
+
+Se o projeto já estiver configurado com Git, NÃO é necessário
+executar git init novamente.
+
+Para verificar:
+
+    git status
+
+
+Para verificar o repositório conectado:
+
+    git remote -v
+
+
+============================================================
+6. ANTES DE COMEÇAR A TRABALHAR
+============================================================
+
+Sempre atualizar o projeto:
+
+    git pull
+
+
+Depois disso, fazer as alterações normalmente.
+
+
+============================================================
+7. FAZER ALTERAÇÕES
+============================================================
+
+Altere os arquivos necessários do aplicativo.
+
+Exemplos:
+
+    app/
+    components/
+    services/
+    assets/
+    etc.
+
+
+============================================================
+8. VERIFICAR AS ALTERAÇÕES
+============================================================
+
+Depois de terminar:
+
+    git status
+
+
+Esse comando mostra quais arquivos foram alterados.
+
+
+============================================================
+9. ADICIONAR AS ALTERAÇÕES
+============================================================
+
+Execute:
+
+    git add .
+
+
+============================================================
+10. CRIAR O COMMIT
+============================================================
+
+Execute:
+
+    git commit -m "Descrição da alteração"
+
+
+Exemplo:
+
+    git commit -m "Corrige tela de pesquisa"
+
+
+Outro exemplo:
+
+    git commit -m "Adiciona filtro de produtos"
+
+
+============================================================
+11. ENVIAR PARA O GITHUB
+============================================================
+
+Depois do commit:
+
+    git push
+
+
+As alterações serão enviadas para o repositório do projeto.
+
+
+============================================================
+12. FLUXO COMPLETO DO GITHUB
+============================================================
+
+ANTES DE COMEÇAR:
+
+    git pull
+
+
+FAZER AS ALTERAÇÕES
+
+
+DEPOIS DE TERMINAR:
+
+    git status
+    git add .
+    git commit -m "Descrição da alteração"
+    git push
+
+
+============================================================
+13. TRABALHO EM EQUIPE
+============================================================
+
+Antes de começar:
+
+    git pull
+
+
+Faça suas alterações.
+
+Depois:
+
+    git add .
+    git commit -m "Descrição da alteração"
+    git push
+
+
+Assim, os outros integrantes poderão baixar as alterações
+com:
+
+    git pull
+
+
+============================================================
+14. SE DER ERRO NO git push
+============================================================
+
+Se aparecer uma mensagem informando que existem alterações
+novas no GitHub, execute:
+
+    git pull
+
+
+Depois verifique:
+
+    git status
+
+
+Se não houver conflitos, faça novamente:
+
+    git add .
+    git commit -m "Descrição da alteração"
+    git push
+
+
+NÃO utilizar:
+
+    git push --force
+
+sem saber exatamente o que está fazendo.
+
+
+============================================================
+15. VERIFICAR O REPOSITÓRIO
+============================================================
+
+Para descobrir qual repositório está conectado:
+
+    git remote -v
+
+
+O resultado deverá mostrar o repositório do React
+do projeto Peça por Peça.
+
+
+============================================================
+16. COMANDOS PRINCIPAIS
+============================================================
+
+REACT:
+
+    npm install
+    npm start
+
+
+GIT:
+
+    git pull
+    git status
+    git add .
+    git commit -m "Descrição da alteração"
+    git push
+
+
+============================================================
+17. ROTINA RÁPIDA
+============================================================
+
+COMEÇAR:
+
+    git pull
+    npm install
+    npm start
+
+
+TRABALHAR:
+
+    Fazer as alterações no código.
+
+
+FINALIZAR:
+
+    git status
+    git add .
+    git commit -m "Descrição da alteração"
+    git push
+
+
+============================================================
+                    PEÇA POR PEÇA
+============================================================
+
+Aplicativo React Native da plataforma
+de troca de peças eletrônicas.
+
+============================================================
