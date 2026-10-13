@@ -592,21 +592,25 @@ const styles = StyleSheet.create({
   mainContainer: { flex: 1, backgroundColor: "#FFFFFF" },
 
   listHeader: {
+  alignItems: "center",
+  justifyContent: "center",
     paddingHorizontal: 20,
     paddingTop: 24,
     paddingBottom: 12,
     backgroundColor: "#FFFFFF",
   },
   title: {
-    fontSize: 28,
+    fontSize: 18,
     fontFamily: "Montserrat_700Bold",
     color: "#005386",
+     textAlign: "center",
   },
   subtitle: {
     marginTop: 4,
     fontSize: 12,
     color: "#8A9BA8",
     fontFamily: "Montserrat_400Regular",
+     textAlign: "center",
   },
 
   bannerError: {

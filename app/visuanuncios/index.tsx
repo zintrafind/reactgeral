@@ -28,7 +28,6 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import api from "../../services/api";
-
 // =========================================================
 // TIPOS
 // =========================================================
@@ -42,20 +41,16 @@ type GalleryProps = {
   onOpen?: () => void;
   stageHeight?: number;
 };
-
 const THUMB_SIZE = 62;
 const THUMB_GAP = 8;
-
 // Breakpoint: a partir daqui vira layout de 2 colunas no web
 const DESKTOP_BREAKPOINT = 1024;
 // Largura máxima do conteúdo inteiro em desktop (para não esticar em telas ultra-wide)
 const DESKTOP_MAX_WIDTH = 1440;
 // Largura máxima do conteúdo em mobile/tablet
 const MOBILE_MAX_WIDTH = 760;
-
 const clampPhotoIndex = (index: number, count: number) =>
   Math.max(0, Math.min(Math.round(index), Math.max(0, count - 1)));
-
 // =========================================================
 // IMAGEM COM FEEDBACK DE LOAD / ERRO
 // =========================================================
@@ -71,12 +66,10 @@ function GalleryImage({
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
-
   useEffect(() => {
     setLoaded(false);
     setFailed(false);
   }, [uri, attempt]);
-
   return (
     <View style={galleryStyles.photoBody}>
       {!failed && (
@@ -124,7 +117,6 @@ function GalleryImage({
     </View>
   );
 }
-
 // =========================================================
 // CARROSSEL
 // =========================================================
@@ -155,14 +147,12 @@ const PhotoCarousel = React.forwardRef<GalleryHandle, GalleryProps>(function Pho
   const positionedRef = useRef(false);
   const changeCallbackRef = useRef(onIndexChange);
   changeCallbackRef.current = onIndexChange;
-
   const clearSettleTimer = useCallback(() => {
     if (settleTimerRef.current !== null) {
       clearTimeout(settleTimerRef.current);
       settleTimerRef.current = null;
     }
   }, []);
-
   const commitIndex = useCallback(
     (index: number) => {
       const next = clampPhotoIndex(index, photos.length);
@@ -174,7 +164,6 @@ const PhotoCarousel = React.forwardRef<GalleryHandle, GalleryProps>(function Pho
     },
     [photos.length],
   );
-
   const goToIndex = useCallback(
     (index: number, animated = true) => {
       if (!photos.length || viewportWidth <= 0) return;
@@ -190,16 +179,13 @@ const PhotoCarousel = React.forwardRef<GalleryHandle, GalleryProps>(function Pho
     },
     [clearSettleTimer, commitIndex, photos.length, viewportWidth],
   );
-
   useImperativeHandle(forwardedRef, () => ({ goToIndex }), [goToIndex]);
-
   const moveBy = useCallback(
     (direction: number) => {
       goToIndex((targetRef.current ?? indexRef.current) + direction);
     },
     [goToIndex],
   );
-
   useLayoutEffect(() => {
     if (viewportWidth <= 0) return;
     const next = clampPhotoIndex(indexRef.current, photos.length);
@@ -211,16 +197,13 @@ const PhotoCarousel = React.forwardRef<GalleryHandle, GalleryProps>(function Pho
     });
     return () => cancelAnimationFrame(frame);
   }, [viewportWidth, photos.length, goToIndex]);
-
   useEffect(() => {
     if (thumbsWidth <= 0) return;
     const centeredOffset =
       activeIndex * (THUMB_SIZE + THUMB_GAP) + THUMB_SIZE / 2 + 2 - thumbsWidth / 2;
     thumbsRef.current?.scrollTo({ x: Math.max(0, centeredOffset), y: 0, animated: true });
   }, [activeIndex, thumbsWidth]);
-
   useEffect(() => () => clearSettleTimer(), [clearSettleTimer]);
-
   const handleScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       if (!positionedRef.current || viewportWidth <= 0) return;
@@ -228,7 +211,6 @@ const PhotoCarousel = React.forwardRef<GalleryHandle, GalleryProps>(function Pho
       const x = event.nativeEvent.contentOffset.x;
       offsetRef.current = x;
       commitIndex(x / viewportWidth);
-
       if (Platform.OS === "web") {
         clearSettleTimer();
         settleTimerRef.current = setTimeout(() => {
@@ -244,7 +226,6 @@ const PhotoCarousel = React.forwardRef<GalleryHandle, GalleryProps>(function Pho
     },
     [clearSettleTimer, commitIndex, goToIndex, photos.length, viewportWidth],
   );
-
   const handleScrollEnd = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       if (!positionedRef.current || viewportWidth <= 0) return;
@@ -255,7 +236,6 @@ const PhotoCarousel = React.forwardRef<GalleryHandle, GalleryProps>(function Pho
     },
     [commitIndex, viewportWidth],
   );
-
   // Arraste com mouse (web)
   useEffect(() => {
     if (Platform.OS !== "web" || typeof document === "undefined" || viewportWidth <= 0) return;
@@ -266,7 +246,6 @@ const PhotoCarousel = React.forwardRef<GalleryHandle, GalleryProps>(function Pho
       | null;
     const node = webScroll?.getScrollableNode?.();
     if (!node?.addEventListener) return;
-
     let pointerId: number | null = null;
     let startX = 0;
     let startY = 0;
@@ -274,7 +253,6 @@ const PhotoCarousel = React.forwardRef<GalleryHandle, GalleryProps>(function Pho
     let savedSnap = "";
     let savedBehavior = "";
     let savedCursor = "";
-
     const restoreStyles = () => {
       node.style.scrollSnapType = savedSnap;
       node.style.scrollBehavior = savedBehavior;
@@ -328,7 +306,6 @@ const PhotoCarousel = React.forwardRef<GalleryHandle, GalleryProps>(function Pho
       event.stopPropagation();
     };
     const preventImageDrag = (event: Event) => event.preventDefault();
-
     node.addEventListener("pointerdown", handlePointerDown);
     document.addEventListener("pointermove", handlePointerMove, { passive: false });
     document.addEventListener("pointerup", finishDrag);
@@ -346,17 +323,14 @@ const PhotoCarousel = React.forwardRef<GalleryHandle, GalleryProps>(function Pho
       mouseDraggingRef.current = false;
     };
   }, [clearSettleTimer, goToIndex, photos.length, viewportWidth]);
-
   const openPhoto = () => {
     if (Date.now() < suppressClickUntilRef.current) return;
     onOpen?.();
   };
-
   // Altura do stage: usa prop (calculada pelo parent com base no layout),
   // ou fallback baseado na largura
   const stageHeight =
     stageHeightProp ?? Math.min(560, Math.max(280, viewportWidth * 0.94));
-
   return (
     <View style={[galleryStyles.carousel, fullscreen && galleryStyles.fullscreenCarousel]}>
       <View
@@ -420,7 +394,6 @@ const PhotoCarousel = React.forwardRef<GalleryHandle, GalleryProps>(function Pho
                 </Pressable>
               ))}
             </ScrollView>
-
             {!fullscreen && (
               <TouchableOpacity
                 style={galleryStyles.expandButton}
@@ -432,7 +405,6 @@ const PhotoCarousel = React.forwardRef<GalleryHandle, GalleryProps>(function Pho
                 <Feather name="maximize" size={18} color="#0F172A" />
               </TouchableOpacity>
             )}
-
             {photos.length > 1 && (
               <>
                 <TouchableOpacity
@@ -467,7 +439,6 @@ const PhotoCarousel = React.forwardRef<GalleryHandle, GalleryProps>(function Pho
                 </TouchableOpacity>
               </>
             )}
-
             <View pointerEvents="none" style={galleryStyles.counter}>
               <Feather name="image" size={13} color="#FFFFFF" />
               <Text
@@ -481,7 +452,6 @@ const PhotoCarousel = React.forwardRef<GalleryHandle, GalleryProps>(function Pho
           </>
         ) : null}
       </View>
-
       {photos.length > 1 && (
         <ScrollView
           ref={thumbsRef}
@@ -514,7 +484,6 @@ const PhotoCarousel = React.forwardRef<GalleryHandle, GalleryProps>(function Pho
     </View>
   );
 });
-
 // =========================================================
 // GALERIA COMPLETA
 // =========================================================
@@ -533,7 +502,6 @@ function ProductGallery({
   const viewerIndexRef = useRef(0);
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerInitialIndex, setViewerInitialIndex] = useState(0);
-
   const openViewer = () => {
     if (!photos.length) return;
     viewerIndexRef.current = currentIndexRef.current;
@@ -545,7 +513,6 @@ function ProductGallery({
     currentIndexRef.current = viewerIndexRef.current;
     setViewerVisible(false);
   }, []);
-
   useEffect(() => {
     if (!viewerVisible || Platform.OS !== "web" || typeof window === "undefined") return;
     const handleKey = (event: KeyboardEvent) => {
@@ -562,7 +529,6 @@ function ProductGallery({
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   }, [closeViewer, viewerVisible]);
-
   return (
     <View style={galleryStyles.gallerySection}>
       <PhotoCarousel
@@ -615,7 +581,6 @@ function ProductGallery({
     </View>
   );
 }
-
 // =========================================================
 // TELA PRINCIPAL
 // =========================================================
@@ -624,19 +589,15 @@ export default function ProductDetailScreen() {
   const { id } = useLocalSearchParams<{ id?: string | string[] }>();
   const productId = Array.isArray(id) ? id[0] : id;
   const { width: windowWidth } = useWindowDimensions();
-
   // Layout: 2 colunas em desktop
   const isDesktop = Platform.OS === "web" && windowWidth >= DESKTOP_BREAKPOINT;
-
   // Largura do conteúdo total
   const contentWidth = Math.min(windowWidth, isDesktop ? DESKTOP_MAX_WIDTH : MOBILE_MAX_WIDTH);
-
-  // Em desktop: galeria ocupa ~55%, info ~45% (com gap de 32)
+  // Em desktop: galeria ocupa \~55%, info \~45% (com gap de 32)
   const contentInnerWidth = contentWidth - 32; // padding lateral 16*2
   const galleryWidth = isDesktop
     ? Math.floor((contentInnerWidth - 32) * 0.55)
     : contentInnerWidth;
-
   // Altura do stage: em desktop usa min(560, altura da janela * 0.72);
   // em mobile/tablet, mantém proporcional à largura
   const stageHeight = useMemo(() => {
@@ -645,21 +606,19 @@ export default function ProductDetailScreen() {
     }
     return Math.min(520, Math.max(260, galleryWidth * 0.94));
   }, [galleryWidth, isDesktop]);
-
   const [product, setProduct] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-
   // TROCA
   const [solicitandoTroca, setSolicitandoTroca] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [meusProdutos, setMeusProdutos] = useState<any[]>([]);
-  const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
-  // FAVORITOS
+  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [enviandoProposta, setEnviandoProposta] = useState(false);
   const propostaEmEnvioRef = useRef(false);
+
+  // FAVORITOS
   const [favoritado, setFavoritado] = useState(false);
   const [carregandoFavorito, setCarregandoFavorito] = useState(false);
-
   const getImageUrl = (imagePath?: string | null) => {
     if (!imagePath) return null;
     const path = String(imagePath).trim();
@@ -687,11 +646,9 @@ export default function ProductDetailScreen() {
         return "Não informado";
     }
   };
-
   useEffect(() => {
     buscarProduto();
   }, [productId]);
-
   const buscarProduto = async () => {
     try {
       setLoading(true);
@@ -713,7 +670,6 @@ export default function ProductDetailScreen() {
       setLoading(false);
     }
   };
-
   const verificarFavorito = async (produtoAtual: any) => {
     try {
       const token = await AsyncStorage.getItem("token");
@@ -733,7 +689,6 @@ export default function ProductDetailScreen() {
       console.error("Erro ao verificar favorito:", error);
     }
   };
-
   const handleFavorito = async () => {
     if (carregandoFavorito) return;
     try {
@@ -764,7 +719,6 @@ export default function ProductDetailScreen() {
       setCarregandoFavorito(false);
     }
   };
-
   const handleSolicitarTroca = async () => {
     try {
       const token = await AsyncStorage.getItem("token");
@@ -793,7 +747,7 @@ export default function ProductDetailScreen() {
         return;
       }
       setMeusProdutos(produtosDisponiveis);
-      setSelectedProductId(null);
+      setSelectedProductIds([]);
       setModalVisible(true);
     } catch (error) {
       console.error("Erro ao solicitar troca:", error);
@@ -802,35 +756,59 @@ export default function ProductDetailScreen() {
       setSolicitandoTroca(false);
     }
   };
-
   const handleConfirmarTroca = async () => {
+    if (selectedProductIds.length === 0) {
+      Alert.alert("Atenção", "Selecione pelo menos um produto para oferecer.");
+      return;
+    }
+
+    // O backend atual ainda registra uma única peça por proposta.
+    // Com apenas 1 item selecionado, mantém exatamente o fluxo antigo.
+    if (selectedProductIds.length > 1) {
+      Alert.alert(
+        "Proposta com múltiplos itens",
+        "A seleção de vários itens já funciona no front-end, mas o envio de múltiplos itens ainda depende do backend. Para realizar uma troca de exemplo agora, selecione apenas um item."
+      );
+      return;
+    }
+
     if (propostaEmEnvioRef.current) return;
+
     propostaEmEnvioRef.current = true;
     setEnviandoProposta(true);
+
     try {
-      if (!selectedProductId) {
-        Alert.alert("Atenção", "Selecione um produto para oferecer.");
-        return;
-      }
       const token = await AsyncStorage.getItem("token");
+
       if (!token) {
         Alert.alert("Atenção", "Você precisa estar logado para realizar uma troca.");
         return;
       }
+
+      const selectedProductId = selectedProductIds[0];
+
       await api.post(
         "/propostas",
         {
           id_produto_desejado: Number(product.id_produto),
           id_produto_oferecido: Number(selectedProductId),
         },
-        { headers: { Accept: "application/json", Authorization: `Bearer ${token}` } },
+        {
+          headers: {
+            Accept: "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        },
       );
+
       setModalVisible(false);
-      setSelectedProductId(null);
+      setSelectedProductIds([]);
+
       Alert.alert("Sucesso", "Sua proposta de troca foi enviada!");
       router.push("/trocas" as any);
     } catch (error: any) {
       console.error("Erro ao confirmar troca:", error);
+
       Alert.alert(
         "Erro",
         error?.response?.data?.message ||
@@ -852,7 +830,6 @@ export default function ProductDetailScreen() {
     }
     router.push(`/visualizarperfil?id=${idUsuario}` as any);
   };
-
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -861,7 +838,6 @@ export default function ProductDetailScreen() {
       </View>
     );
   }
-
   if (!product) {
     return (
       <View style={styles.loadingContainer}>
@@ -870,7 +846,6 @@ export default function ProductDetailScreen() {
       </View>
     );
   }
-
   const rawImages = Array.isArray(product.images)
     ? product.images
     : Array.isArray(product.imagens)
@@ -906,7 +881,6 @@ export default function ProductDetailScreen() {
   }
   const fotoPerfil = product?.user?.ds_foto_perfil || product?.user?.ds_foto;
   const fotoPerfilUrl = getImageUrl(fotoPerfil);
-
   return (
     <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
@@ -933,7 +907,6 @@ export default function ProductDetailScreen() {
               )}
             </TouchableOpacity>
           </View>
-
           {/* CONTEÚDO — 1 coluna mobile / 2 colunas desktop */}
           <View style={[styles.layout, isDesktop && styles.layoutDesktop]}>
             {/* COLUNA ESQUERDA — GALERIA */}
@@ -945,7 +918,6 @@ export default function ProductDetailScreen() {
                 stageHeight={stageHeight}
               />
             </View>
-
             {/* COLUNA DIREITA — INFO + ANUNCIANTE + TROCA */}
             <View style={[styles.infoColumn, isDesktop && styles.infoColumnDesktop]}>
               <View style={styles.productInfo}>
@@ -968,7 +940,6 @@ export default function ProductDetailScreen() {
                   </>
                 )}
               </View>
-
               {product.user && (
                 <View style={styles.sellerSection}>
                   <Text style={styles.sectionTitle}>Anunciante</Text>
@@ -996,7 +967,6 @@ export default function ProductDetailScreen() {
                   </TouchableOpacity>
                 </View>
               )}
-
               <View style={styles.exchangeSection}>
                 <TouchableOpacity
                   style={styles.exchangeButton}
@@ -1018,7 +988,6 @@ export default function ProductDetailScreen() {
           </View>
         </View>
       </ScrollView>
-
       {/* MODAL SOLICITAR TROCA */}
       <Modal
         animationType="slide"
@@ -1040,7 +1009,7 @@ export default function ProductDetailScreen() {
               >
                 <Feather name="arrow-left" size={22} color="#005386" />
               </TouchableOpacity>
-              <Text style={styles.modalHeaderTitle}>Solicitar Troca</Text>
+              <Text style={styles.modalHeaderTitle}>Solicitar troca</Text>
               <View style={styles.modalHeaderSpacer} />
             </View>
             <FlatList
@@ -1084,7 +1053,7 @@ export default function ProductDetailScreen() {
                 </View>
               }
               renderItem={({ item }) => {
-                const isSelected = selectedProductId === String(item.id_produto);
+                const isSelected = selectedProductIds.includes(String(item.id_produto));
                 const imagemProduto =
                   item.images?.[0]?.ds_imagem ||
                   item.imagens?.[0]?.ds_imagem ||
@@ -1095,7 +1064,14 @@ export default function ProductDetailScreen() {
                   <TouchableOpacity
                     style={[styles.myProductCard, isSelected && styles.myProductCardSelected]}
                     activeOpacity={0.7}
-                    onPress={() => setSelectedProductId(String(item.id_produto))}
+                    onPress={() => {
+                      const idProduto = String(item.id_produto);
+                      setSelectedProductIds((atuais) =>
+                        atuais.includes(idProduto)
+                          ? atuais.filter((id) => id !== idProduto)
+                          : [...atuais, idProduto],
+                      );
+                    }}
                   >
                     <View style={styles.myProductImageContainer}>
                       {imagemUrl ? (
@@ -1127,16 +1103,17 @@ export default function ProductDetailScreen() {
               <TouchableOpacity
                 style={[
                   styles.confirmButton,
-                  (!selectedProductId || enviandoProposta) && styles.confirmButtonDisabled,
+                  (selectedProductIds.length === 0 || enviandoProposta) &&
+                    styles.confirmButtonDisabled,
                 ]}
                 activeOpacity={0.8}
-                disabled={!selectedProductId || enviandoProposta}
+                disabled={selectedProductIds.length === 0 || enviandoProposta}
                 onPress={handleConfirmarTroca}
               >
                 {enviandoProposta ? (
                   <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
-                  <Text style={styles.confirmButtonText}>Confirmar Proposta</Text>
+                  <Text style={styles.confirmButtonText}>Confirmar proposta</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -1146,7 +1123,6 @@ export default function ProductDetailScreen() {
     </SafeAreaView>
   );
 }
-
 // =============================================================
 // ESTILOS
 // =============================================================
@@ -1157,7 +1133,6 @@ const styles = StyleSheet.create({
     width: "100%",
     alignSelf: "center",
   },
-
   loadingContainer: {
     flex: 1,
     justifyContent: "center",
@@ -1170,7 +1145,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#777777",
   },
-
   // HEADER
   header: {
     height: 62,
@@ -1201,7 +1175,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#005386",
   },
-
   // LAYOUT (1 col mobile / 2 col desktop)
   layout: {
     flexDirection: "column",
@@ -1214,18 +1187,15 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     gap: 32,
   },
-
   galleryColumn: {
     width: "100%",
   },
-
   infoColumn: {
     width: "100%",
   },
   infoColumnDesktop: {
     flex: 1,
   },
-
   // PRODUTO
   productInfo: { paddingTop: 4 },
   productTitle: {
@@ -1267,7 +1237,6 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     color: "#555555",
   },
-
   // ANUNCIANTE
   sellerSection: { marginTop: 25 },
   sellerCard: {
@@ -1301,7 +1270,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: "#0099FF",
   },
-
   // TROCA
   exchangeSection: { marginTop: 25 },
   exchangeButton: {
@@ -1323,7 +1291,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: "#FFFFFF",
   },
-
   // MODAL
   modalOverlay: { flex: 1, justifyContent: "flex-end" },
   modalBackdropTouch: {
@@ -1366,7 +1333,6 @@ const styles = StyleSheet.create({
   },
   modalHeaderSpacer: { width: 30 },
   modalListContent: { padding: 20, paddingBottom: 20 },
-
   targetProductCard: {
     flexDirection: "row",
     backgroundColor: "#E4F8FF",
@@ -1411,7 +1377,6 @@ const styles = StyleSheet.create({
     color: "#005386",
     marginBottom: 10,
   },
-
   myProductCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -1458,7 +1423,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   checkboxSelected: { backgroundColor: "#0099FF", borderColor: "#0099FF" },
-
   modalFooterContainer: {
     padding: 16,
     borderTopWidth: 1,
@@ -1479,7 +1443,6 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
   },
 });
-
 const galleryStyles = StyleSheet.create({
   gallerySection: { width: "100%" },
   carousel: { width: "100%" },

@@ -223,15 +223,17 @@ export default function Layout() {
             }
             activeOpacity={0.7}
           >
-            <Feather
-              name="message-square"
-              size={24}
-              color={
-                isMensagens
-                  ? "#005386"
-                  : "#777777"
-              }
-            />
+            <View style={styles.messagesTouchArea}>
+              <Feather
+                name="message-circle"
+                size={24}
+                color={
+                  isMensagens
+                    ? "#005386"
+                    : "#777777"
+                }
+              />
+            </View>
           </TouchableOpacity>
 
           {/* ANUNCIAR */}
@@ -358,6 +360,15 @@ const styles = StyleSheet.create({
 
   navItem: {
     flex: 1,
+    height: 60,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  // Mantém a aba de Mensagens com o mesmo tamanho e posição das outras.
+  // Só limita a área visual do botão para ficar com o mesmo tamanho da referência.
+  messagesTouchArea: {
+    width: 74,
     height: 60,
     justifyContent: "center",
     alignItems: "center",

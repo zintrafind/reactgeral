@@ -25,30 +25,27 @@ import {
   View,
 } from "react-native";
 import api from "../../services/api.js";
-
 const HORIZONTAL_PADDING = 32;
-
 const GRID_GAP = 14;
-
 const PRODUCT_IMAGE_RATIO = 1.4;
-
 const BANNER_HEIGHT = 150;
-
 const AUTO_PLAY_INTERVAL = 4500;
-
 const REQUEST_TIMEOUT = 15000;
-
 const PRODUCTS_CACHE_KEY = "@pecapeca:products_cache_v2";
-
 const CACHE_MAX_AGE = 6 * 60 * 60 * 1000;
 
+const AVALIACAO_PREFIX = "@pecapeca:avaliacao_visual:";
+
+// Critério LOCAL do UC41 para demonstração no front-end.
+// Pode ser alterado depois conforme a regra oficial do sistema.
+const NOTA_MINIMA_DESTAQUE = 4.0;
+const MINIMO_AVALIACOES_DESTAQUE = 2;
 type Banner = {
   id: string;
   label: string;
   image: ImageSourcePropType;
   destination: Href | null;
 };
-
 const BANNERS: Banner[] = [
   {
     id: "1",
@@ -69,7 +66,6 @@ const BANNERS: Banner[] = [
     destination: null,
   },
 ];
-
 const CATEGORIES = [
   { id: null, name: "Todos" },
   { id: 1, name: "Hardware" },
@@ -82,7 +78,6 @@ const CATEGORIES = [
   { id: 8, name: "Câmeras" },
   { id: 9, name: "Outros" },
 ] as const;
-
 const CONDITION_NAMES: Record<string, string> = {
   N: "Novo",
   S: "Seminovo",
@@ -90,27 +85,33 @@ const CONDITION_NAMES: Record<string, string> = {
   Q: "Quebrado",
 };
 // Sombras próprias para Web, iOS e Android, sem dependências extras.
-
 const HEADER_SHADOW: ViewStyle = Platform.select({
   web: { boxShadow: "0px 5px 16px rgba(0, 83, 134, 0.08)" } as ViewStyle,
   ios: { shadowColor: "#005386", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.08, shadowRadius: 10 },
   default: { elevation: 4 },
 }) ?? {};
-
 const CARD_SHADOW: ViewStyle = Platform.select({
   web: { boxShadow: "0px 4px 14px rgba(0, 83, 134, 0.06)" } as ViewStyle,
   ios: { shadowColor: "#005386", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.07, shadowRadius: 8 },
   default: { elevation: 2 },
 }) ?? {};
+type AvaliacaoLocal = {
+  id_usuario_avaliado?: number | string;
+  nota?: number;
+};
 
-
+type UsuarioBemAvaliado = {
+  id_usuario: number;
+  nome: string;
+  media: number;
+  quantidade: number;
+};
 
 type ImagemProduto = {
   id_imagem?: number;
   ds_imagem: string;
   nr_ordem?: number;
 };
-
 interface Produto {
   id_produto: number;
   id_usuario: number;
@@ -126,7 +127,6 @@ interface Produto {
   imagens?: ImagemProduto[];
   ds_imagem?: string;
 }
-
 function getImageUrl(imagePath?: string | null): string | null {
   const path = String(imagePath || "").trim();
   if (!path) return null;
@@ -144,7 +144,6 @@ function getImageUrl(imagePath?: string | null): string | null {
     .replace(/^storage\/+/, "");
   return `${baseUrl}/storage/${cleanPath}`;
 }
-
 function getProductImages(item: Produto): string[] {
   const lista =
     Array.isArray(item.images) && item.images.length > 0
@@ -164,7 +163,6 @@ function getProductImages(item: Produto): string[] {
   const antiga = getImageUrl(item.ds_imagem);
   return antiga ? [antiga] : [];
 }
-
 function extractProducts(payload: any): Produto[] {
   if (Array.isArray(payload)) return payload;
   if (Array.isArray(payload?.data)) return payload.data;
@@ -172,7 +170,6 @@ function extractProducts(payload: any): Produto[] {
   if (Array.isArray(payload?.produtos)) return payload.produtos;
   throw new Error("A API retornou uma lista de produtos inválida.");
 }
-
 function removeDuplicates(list: Produto[]): Produto[] {
   const map = new Map<number, Produto>();
   for (const item of list) {
@@ -183,7 +180,6 @@ function removeDuplicates(list: Produto[]): Produto[] {
   }
   return Array.from(map.values());
 }
-
 async function saveCache(products: Produto[]) {
   try {
     await AsyncStorage.setItem(
@@ -197,7 +193,6 @@ async function saveCache(products: Produto[]) {
     // Falha no cache não impede a exibição dos produtos.
   }
 }
-
 async function loadCache(): Promise<Produto[] | null> {
   try {
     const raw = await AsyncStorage.getItem(PRODUCTS_CACHE_KEY);
@@ -215,12 +210,9 @@ async function loadCache(): Promise<Produto[] | null> {
     return null;
   }
 }
-
 // ============================================================
 // BANNERS
-
 // ============================================================
-
 const BannerCarousel = memo(function BannerCarousel() {
   const router = useRouter();
   const { width } = useWindowDimensions();
@@ -356,12 +348,9 @@ const BannerCarousel = memo(function BannerCarousel() {
     </View>
   );
 });
-
 // ============================================================
 // FOTOS E CARDS DE PRODUTOS
-
 // ============================================================
-
 const ProductPhoto = memo(function ProductPhoto({
   uri,
 }: {
@@ -387,7 +376,6 @@ const ProductPhoto = memo(function ProductPhoto({
     />
   );
 });
-
 const ProductCard = memo(function ProductCard({
   item,
   cardWidth,
@@ -533,12 +521,55 @@ const ProductCard = memo(function ProductCard({
     </View>
   );
 });
+// ============================================================
+// UC41 — CARD DE USUÁRIO BEM AVALIADO — SOMENTE FRONT-END
+// ============================================================
+
+const WellRatedUserCard = memo(function WellRatedUserCard({
+  item,
+  onPress,
+}: {
+  item: UsuarioBemAvaliado;
+  onPress: (item: UsuarioBemAvaliado) => void;
+}) {
+  return (
+    <TouchableOpacity
+      style={styles.wellRatedUserCard}
+      activeOpacity={0.82}
+      onPress={() => onPress(item)}
+      accessibilityRole="button"
+      accessibilityLabel={`Ver perfil de ${item.nome}`}
+    >
+      <View style={styles.wellRatedAvatar}>
+        <Feather name="user" size={25} color="#005386" />
+      </View>
+
+      <Text style={styles.wellRatedName} numberOfLines={1}>
+        {item.nome}
+      </Text>
+
+      <View style={styles.wellRatedScoreRow}>
+        <Feather name="star" size={14} color="#005386" />
+        <Text style={styles.wellRatedScore}>
+          {item.media.toFixed(1)}
+        </Text>
+      </View>
+
+      <Text style={styles.wellRatedCount}>
+        {item.quantidade} {item.quantidade === 1 ? "avaliação" : "avaliações"}
+      </Text>
+
+      <View style={styles.wellRatedBadge}>
+        <Feather name="award" size={12} color="#005386" />
+        <Text style={styles.wellRatedBadgeText}>Bem avaliado</Text>
+      </View>
+    </TouchableOpacity>
+  );
+});
 
 // ============================================================
 // CARREGAMENTO DOS PRODUTOS
-
 // ============================================================
-
 function useProducts() {
   const [products, setProducts] = useState<Produto[]>([]);
   const [loading, setLoading] = useState(true);
@@ -637,12 +668,9 @@ function useProducts() {
     retryLoad,
   };
 }
-
 // ============================================================
 // FOTO DO USUÁRIO
-
 // ============================================================
-
 function useProfileImage() {
   const [profileImage, setProfileImage] =
     useState<string | null>(null);
@@ -700,12 +728,9 @@ function useProfileImage() {
   );
   return { profileImage, setProfileImage };
 }
-
 // ============================================================
 // TELA INICIAL
-
 // ============================================================
-
 export default function HomeScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
@@ -720,6 +745,110 @@ export default function HomeScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] =
     useState<number | null>(null);
+
+  const [usuariosBemAvaliados, setUsuariosBemAvaliados] =
+    useState<UsuarioBemAvaliado[]>([]);
+  const carregarUsuariosBemAvaliados = useCallback(async () => {
+    try {
+      if (products.length === 0) {
+        setUsuariosBemAvaliados([]);
+        return;
+      }
+
+      const todasAsChaves = await AsyncStorage.getAllKeys();
+      const chavesAvaliacoes = todasAsChaves.filter((chave) =>
+        chave.startsWith(AVALIACAO_PREFIX)
+      );
+
+      if (chavesAvaliacoes.length === 0) {
+        setUsuariosBemAvaliados([]);
+        return;
+      }
+
+      const registros = await AsyncStorage.multiGet(chavesAvaliacoes);
+
+      const avaliacoes = registros
+        .map(([, valor]) => {
+          try {
+            return valor ? (JSON.parse(valor) as AvaliacaoLocal) : null;
+          } catch {
+            return null;
+          }
+        })
+        .filter(
+          (item): item is AvaliacaoLocal =>
+            !!item &&
+            !!item.id_usuario_avaliado &&
+            Number(item.nota) >= 1 &&
+            Number(item.nota) <= 5
+        );
+
+      const usuariosDosAnuncios = new Map<number, string>();
+
+      products.forEach((produto) => {
+        const idUsuario = Number(produto.id_usuario || 0);
+
+        if (!idUsuario) return;
+
+        const nome =
+          produto.user?.nm_usuario?.trim() ||
+          `Usuário ${idUsuario}`;
+
+        if (!usuariosDosAnuncios.has(idUsuario)) {
+          usuariosDosAnuncios.set(idUsuario, nome);
+        }
+      });
+
+      const destaques: UsuarioBemAvaliado[] = [];
+
+      usuariosDosAnuncios.forEach((nome, idUsuario) => {
+        const notasDoUsuario = avaliacoes
+          .filter(
+            (avaliacao) =>
+              Number(avaliacao.id_usuario_avaliado) === idUsuario
+          )
+          .map((avaliacao) => Number(avaliacao.nota));
+
+        if (notasDoUsuario.length < MINIMO_AVALIACOES_DESTAQUE) {
+          return;
+        }
+
+        const media =
+          notasDoUsuario.reduce((total, nota) => total + nota, 0) /
+          notasDoUsuario.length;
+
+        if (media < NOTA_MINIMA_DESTAQUE) {
+          return;
+        }
+
+        destaques.push({
+          id_usuario: idUsuario,
+          nome,
+          media,
+          quantidade: notasDoUsuario.length,
+        });
+      });
+
+      destaques.sort((a, b) => {
+        if (b.media !== a.media) {
+          return b.media - a.media;
+        }
+
+        return b.quantidade - a.quantidade;
+      });
+
+      setUsuariosBemAvaliados(destaques.slice(0, 10));
+    } catch {
+      setUsuariosBemAvaliados([]);
+    }
+  }, [products]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void carregarUsuariosBemAvaliados();
+    }, [carregarUsuariosBemAvaliados])
+  );
+
   const { columns, cardWidth } = useMemo(() => {
     const cols = width >= 1100 ? 6 : width >= 700 ? 4 : 2;
     return {
@@ -767,6 +896,16 @@ export default function HomeScreen() {
     },
     [router]
   );
+  const openWellRatedUser = useCallback(
+    (item: UsuarioBemAvaliado) => {
+      router.push({
+        pathname: "/visualizarperfil",
+        params: { id: String(item.id_usuario) },
+      } as Href);
+    },
+    [router]
+  );
+
   const renderProduct = useCallback(
     ({ item }: { item: Produto }) => (
       <ProductCard
@@ -919,6 +1058,46 @@ export default function HomeScreen() {
                 />
               )}
             </View>
+
+            <View style={styles.wellRatedSection}>
+              <View style={styles.titleRow}>
+                <View style={styles.titleFlexible}>
+                  <Text style={styles.sectionTitle}>
+                    Usuários bem avaliados
+                  </Text>
+                  <Text style={styles.sectionSubtitle}>
+                    Perfis com boas avaliações na comunidade.
+                  </Text>
+                </View>
+              </View>
+
+              {usuariosBemAvaliados.length > 0 ? (
+                <FlatList<UsuarioBemAvaliado>
+                  data={usuariosBemAvaliados}
+                  horizontal
+                  keyExtractor={(item) => String(item.id_usuario)}
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.wellRatedListContent}
+                  ItemSeparatorComponent={() => (
+                    <View style={{ width: 12 }} />
+                  )}
+                  renderItem={({ item }) => (
+                    <WellRatedUserCard
+                      item={item}
+                      onPress={openWellRatedUser}
+                    />
+                  )}
+                  initialNumToRender={3}
+                  maxToRenderPerBatch={5}
+                  windowSize={5}
+                />
+              ) : (
+                <Text style={styles.wellRatedEmptyText}>
+                  Ainda não há usuários que atendam aos critérios de destaque.
+                </Text>
+              )}
+            </View>
+
             <Text
               style={[
                 styles.sectionTitle,
@@ -1015,22 +1194,17 @@ export default function HomeScreen() {
     </View>
   );
 }
-
 // ============================================================
 // ESTILOS
-
 // ============================================================
-
 const styles = StyleSheet.create({
   mainContainer: {
     flex: 1,
     backgroundColor: "#f5fafe",
   },
-
   pageContent: {
     paddingBottom: 32,
   },
-
   headerContainer: {
     ...HEADER_SHADOW,
     position: "relative",
@@ -1044,12 +1218,10 @@ const styles = StyleSheet.create({
     borderBottomColor: "#EDF4F8",
     backgroundColor: "#FFFFFF",
   },
-
   logo: {
     width: 48,
     height: 48,
   },
-
   searchContainer: {
     flex: 1,
     flexDirection: "row",
@@ -1062,12 +1234,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#DCEEFA",
   },
-
   searchButton: {
     justifyContent: "center",
     alignItems: "center",
   },
-
   searchInput: {
     flex: 1,
     height: 40,
@@ -1078,8 +1248,13 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontFamily: "Montserrat_400Regular",
     textAlignVertical: "center",
-  },
 
+    // Remove a borda preta de foco no navegador.
+    // O cursor de digitação continua aparecendo normalmente.
+    ...(Platform.OS === "web"
+      ? ({ outlineStyle: "none", outlineWidth: 0 } as any)
+      : {}),
+  },
   profileButton: {
     width: 42,
     height: 42,
@@ -1091,34 +1266,28 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E4F4FF",
   },
-
   profileImage: {
     width: "100%",
     height: "100%",
   },
-
   featuredSection: {
     marginTop: 22,
     paddingHorizontal: 16,
   },
-
   sectionTitle: {
     fontSize: 16,
     color: "#1E2B36",
     marginBottom: 4,
     fontFamily: "Montserrat_600SemiBold",
   },
-
   sectionSubtitle: {
     fontSize: 11,
     color: "#8A9BA8",
     fontFamily: "Montserrat_400Regular",
   },
-
   carouselContainer: {
     width: "100%",
   },
-
   bannerCard: {
     width: "100%",
     height: BANNER_HEIGHT,
@@ -1128,43 +1297,36 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#BDE5FF",
   },
-
   bannerImage: {
     width: "100%",
     height: "100%",
   },
-
   bannerDots: {
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
     marginTop: 10,
   },
-
   bannerDotButton: {
     width: 26,
     height: 24,
     alignItems: "center",
     justifyContent: "center",
   },
-
   bannerDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
     backgroundColor: "#C8DCE8",
   },
-
   bannerDotActive: {
     width: 20,
     backgroundColor: "#0099FF",
   },
-
   productsSection: {
     marginTop: 25,
     marginBottom: 30,
   },
-
   titleRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1172,25 +1334,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     marginBottom: 12,
   },
-
   titleFlexible: {
     flex: 1,
     marginRight: 12,
     marginBottom: 0,
   },
-
   seeMoreText: {
     fontSize: 12,
     color: "#0099FF",
     fontFamily: "Montserrat_600SemiBold",
   },
-
   productListContent: {
     paddingHorizontal: 16,
     paddingTop: 4,
     paddingBottom: 16,
   },
-
   productCard: {
     ...CARD_SHADOW,
     backgroundColor: "#FFFFFF",
@@ -1198,7 +1356,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E6EEF5",
   },
-
   productGallery: {
     width: "100%",
     aspectRatio: PRODUCT_IMAGE_RATIO,
@@ -1208,16 +1365,13 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 17,
     backgroundColor: "#EFF5FA",
   },
-
   productPhotoScroll: {
     flex: 1,
   },
-
   productImage: {
     width: "100%",
     height: "100%",
   },
-
   productPhotoFallback: {
     width: "100%",
     height: "100%",
@@ -1225,7 +1379,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "#F5FBFF",
   },
-
   productPhotoPagination: {
     position: "absolute",
     left: 0,
@@ -1235,41 +1388,34 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-
   productPhotoDotButton: {
     width: 22,
     height: 24,
     justifyContent: "center",
     alignItems: "center",
   },
-
   productPhotoDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
     backgroundColor: "#D7E6EF",
   },
-
   productPhotoDotActive: {
     width: 12,
     backgroundColor: "#0099FF",
   },
-
   productInfo: {
     paddingHorizontal: 9,
     paddingVertical: 8,
     borderBottomLeftRadius: 17,
     borderBottomRightRadius: 17,
   },
-
   productName: {
     fontSize: 13,
     lineHeight: 18,
     color: "#17344A",
     fontFamily: "Montserrat_600SemiBold",
   },
-
-
   conditionText: {
     fontSize: 10,
     lineHeight: 14,
@@ -1277,50 +1423,132 @@ const styles = StyleSheet.create({
     color: "#8A9BA8",
     fontFamily: "Montserrat_400Regular",
   },
-
   productDescription: {
     fontSize: 11,
     lineHeight: 16,
     color: "#0099FF",
     fontFamily: "Montserrat_400Regular",
   },
+  wellRatedSection: {
+    marginBottom: 28,
+  },
+
+  wellRatedListContent: {
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 4,
+  },
+
+  wellRatedUserCard: {
+    ...CARD_SHADOW,
+    width: 142,
+    minHeight: 190,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#E6EEF5",
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+
+  wellRatedAvatar: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: "#F1FAFF",
+    borderWidth: 1,
+    borderColor: "#DCEEFA",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 9,
+  },
+
+  wellRatedName: {
+    width: "100%",
+    textAlign: "center",
+    fontSize: 12,
+    color: "#17344A",
+    fontFamily: "Montserrat_600SemiBold",
+  },
+
+  wellRatedScoreRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 7,
+  },
+
+  wellRatedScore: {
+    marginLeft: 4,
+    fontSize: 12,
+    color: "#005386",
+    fontFamily: "Montserrat_600SemiBold",
+  },
+
+  wellRatedCount: {
+    marginTop: 3,
+    fontSize: 10,
+    color: "#8A9BA8",
+    fontFamily: "Montserrat_400Regular",
+  },
+
+  wellRatedBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 10,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 12,
+    backgroundColor: "#F1FAFF",
+    borderWidth: 1,
+    borderColor: "#DCEEFA",
+  },
+
+  wellRatedBadgeText: {
+    marginLeft: 5,
+    fontSize: 9,
+    color: "#005386",
+    fontFamily: "Montserrat_600SemiBold",
+  },
+
+  wellRatedEmptyText: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    fontSize: 12,
+    lineHeight: 18,
+    color: "#99A9B5",
+    fontFamily: "Montserrat_400Regular",
+  },
 
   exploreTitle: {
     paddingHorizontal: 16,
   },
-
   categoriesScrollView: {
     height: 50,
     borderBottomWidth: 1,
     borderBottomColor: "#EEEEEE",
   },
-
   categoriesContent: {
     paddingHorizontal: 16,
     alignItems: "center",
   },
-
   categoryTab: {
     marginRight: 20,
     paddingVertical: 8,
   },
-
   activeCategoryTab: {
     borderBottomWidth: 2,
     borderBottomColor: "#0099FF",
   },
-
   categoryTabText: {
     fontSize: 14,
     color: "#8A9BA8",
     fontFamily: "Montserrat_400Regular",
   },
-
   activeCategoryTabText: {
     color: "#005386",
     fontFamily: "Montserrat_600SemiBold",
   },
-
   resultCount: {
     marginHorizontal: 16,
     marginTop: 14,
@@ -1329,24 +1557,20 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: "Montserrat_400Regular",
   },
-
   gridRow: {
     paddingHorizontal: 16,
     gap: GRID_GAP,
     marginBottom: 18,
   },
-
   loadingContainer: {
     paddingVertical: 30,
     alignItems: "center",
     justifyContent: "center",
   },
-
   errorContainer: {
     alignItems: "center",
     padding: 24,
   },
-
   retryButton: {
     backgroundColor: "#005386",
     borderRadius: 10,
@@ -1354,12 +1578,10 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     marginTop: 6,
   },
-
   retryText: {
     color: "#FFFFFF",
     fontFamily: "Montserrat_600SemiBold",
   },
-
   emptyText: {
     fontSize: 13,
     color: "#99A9B5",
@@ -1368,7 +1590,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontFamily: "Montserrat_400Regular",
   },
-
   refreshWarning: {
     marginHorizontal: 16,
     marginBottom: 16,
@@ -1376,7 +1597,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: "#F1FAFF",
   },
-
   refreshWarningText: {
     color: "#005386",
     fontSize: 12,

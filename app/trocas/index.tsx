@@ -5,7 +5,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useRouter } from "expo-router";
 
 import { Ionicons } from "@expo/vector-icons";
+
 import React, {
+
   memo,
 
   useCallback,
@@ -17,10 +19,13 @@ import React, {
   useRef,
 
   useState,
+
 } from "react";
 
 import {
+
   ActivityIndicator,
+
   Alert,
 
   AppState,
@@ -30,7 +35,9 @@ import {
   Image,
 
   Modal,
+
   Platform,
+
   ScrollView,
 
   StyleSheet,
@@ -40,21 +47,16 @@ import {
   TouchableOpacity,
 
   View
+
 } from "react-native";
 
-
-
 import api from "../../services/api";
-
-
 
 // ============================================================
 
 // TIPOS
 
 // ============================================================
-
-
 
 type ImagemProduto = {
 
@@ -63,8 +65,6 @@ type ImagemProduto = {
   ds_imagem?: string | null;
 
 };
-
-
 
 type ProdutoTroca = {
 
@@ -83,8 +83,6 @@ type ProdutoTroca = {
   ds_imagem?: string | null;
 
 };
-
-
 
 type Troca = {
 
@@ -108,15 +106,11 @@ type Troca = {
 
 };
 
-
-
 // ============================================================
 
 // CONSTANTES
 
 // ============================================================
-
-
 
 const TROCAS_CACHE_KEY = "@pecapeca:trocas_cache_v1";
 
@@ -127,8 +121,6 @@ const CACHE_TROCAS = 30_000; // throttle de foco (30s)
 const TEMPO_LIMITE_REQUISICAO = 15000;
 
 const LIMITE_INICIAL = 12;
-
-
 
 const CONDITION_NAMES: Record<string, string> = {
 
@@ -142,39 +134,29 @@ const CONDITION_NAMES: Record<string, string> = {
 
 };
 
-
-
 // ============================================================
 
 // HELPERS
 
 // ============================================================
 
-
-
 function getImageUrl(imagePath?: string | null): string | null {
+
   if (!imagePath) return null;
 
-  let path = String(imagePath).trim();
-  if (!path) return null;
+ let path = String(imagePath).trim();
+ 
+ if (!path) return null; if (/^https?:\/\//i.test(path)) 
+  
+  return path; const baseUrl = String( api.defaults?.baseURL || "http://127.0.0.1:8000/api" )
 
-  if (/^https?:\/\//i.test(path)) return path;
+   .replace(/\/api\/?$/, "")
+   
+    .replace(/\/+$/, ""); path = path .replace(/\\/g, "/")
 
-  const baseUrl = String(
-    api.defaults?.baseURL || "http://127.0.0.1:8000/api"
-  )
-    .replace(/\/api\/?$/, "")
-    .replace(/\/+$/, "");
+     .replace(/^\/+/, "") .replace(/^public\//, "") 
 
-  path = path
-    .replace(/\\/g, "/")
-    .replace(/^\/+/, "")
-    .replace(/^public\//, "")
-    .replace(/^storage\/+/, "");
-
-  return `${baseUrl}/storage/${path}`;
-}
-
+     .replace(/^storage\/+/, ""); return `${baseUrl}/storage/${path}`; }
 
 function getProdutoImage(produto: ProdutoTroca | null): string | null {
 
@@ -194,21 +176,15 @@ function getProdutoImage(produto: ProdutoTroca | null): string | null {
 
 }
 
-
-
 function formatarTroca(proposta: any, usuarioLogadoId: number): Troca {
 
   const itemOferecido = proposta.itens?.find((i: any) => i.tp_item === "O");
 
   const itemDesejado = proposta.itens?.find((i: any) => i.tp_item === "D");
 
-
-
   const produtoOferecido = itemOferecido?.produto || null;
 
   const produtoDesejado = itemDesejado?.produto || null;
-
-
 
   const idSolicitante = Number(proposta.id_solicitante);
 
@@ -216,15 +192,11 @@ function formatarTroca(proposta: any, usuarioLogadoId: number): Troca {
 
   const souDestinatario = idDestinatario === usuarioLogadoId;
 
-
-
   const outroUsuario = souDestinatario
 
     ? proposta.solicitante
 
     : proposta.destinatario;
-
-
 
   const status: Troca["status"] =
 
@@ -241,8 +213,6 @@ function formatarTroca(proposta: any, usuarioLogadoId: number): Troca {
       ? "FINALIZADA"
 
       : "RECUSADA";
-
-
 
   return {
 
@@ -274,15 +244,11 @@ function formatarTroca(proposta: any, usuarioLogadoId: number): Troca {
 
 }
 
-
-
 // ============================================================
 
 // CACHE
 
 // ============================================================
-
-
 
 async function saveTrocasCache(trocas: Troca[]) {
 
@@ -299,8 +265,6 @@ async function saveTrocasCache(trocas: Troca[]) {
   } catch {}
 
 }
-
-
 
 async function loadTrocasCache(): Promise<Troca[] | null> {
 
@@ -326,15 +290,11 @@ async function loadTrocasCache(): Promise<Troca[] | null> {
 
 }
 
-
-
 // ============================================================
 
 // SKELETON
 
 // ============================================================
-
-
 
 const SkeletonTradeCard = memo(function SkeletonTradeCard() {
 
@@ -368,11 +328,7 @@ const SkeletonTradeCard = memo(function SkeletonTradeCard() {
 
       </View>
 
-
-
       <View style={styles.headerDivider} />
-
-
 
       {/* Produtos */}
 
@@ -396,15 +352,11 @@ const SkeletonTradeCard = memo(function SkeletonTradeCard() {
 
 });
 
-
-
 // ============================================================
 
 // STATUS BADGE
 
 // ============================================================
-
-
 
 const StatusTroca = memo(function StatusTroca({
 
@@ -480,8 +432,6 @@ const StatusTroca = memo(function StatusTroca({
 
   }, [status]);
 
-
-
   return (
 
     <View style={[styles.statusBadge, config.style]}>
@@ -500,15 +450,11 @@ const StatusTroca = memo(function StatusTroca({
 
 });
 
-
-
 // ============================================================
 
 // CARD DE PRODUTO (memoizado)
 
 // ============================================================
-
-
 
 const ProdutoTrocaCard = memo(function ProdutoTrocaCard({
 
@@ -532,13 +478,9 @@ const ProdutoTrocaCard = memo(function ProdutoTrocaCard({
 
   const [failed, setFailed] = useState(false);
 
-
-
   const handlePress = useCallback(() => onPress(produto), [onPress, produto]);
 
   const handleError = useCallback(() => setFailed(true), []);
-
-
 
   if (!produto) {
 
@@ -566,19 +508,13 @@ const ProdutoTrocaCard = memo(function ProdutoTrocaCard({
 
   }
 
-
-
   const showImage = imageUrl && !failed;
-
-
 
   return (
 
     <View style={styles.tradeProductSection}>
 
       <Text style={styles.tradeProductTitle}>{titulo}</Text>
-
-
 
       <View style={styles.tradeProductCard}>
 
@@ -614,8 +550,6 @@ const ProdutoTrocaCard = memo(function ProdutoTrocaCard({
 
         </View>
 
-
-
         <View style={styles.tradeProductContent}>
 
           <Text style={styles.tradeProductName} numberOfLines={2}>
@@ -623,8 +557,6 @@ const ProdutoTrocaCard = memo(function ProdutoTrocaCard({
             {produto.nm_produto}
 
           </Text>
-
-
 
           {!!produto.st_condicao && (
 
@@ -641,8 +573,6 @@ const ProdutoTrocaCard = memo(function ProdutoTrocaCard({
             </View>
 
           )}
-
-
 
           <TouchableOpacity
 
@@ -670,15 +600,11 @@ const ProdutoTrocaCard = memo(function ProdutoTrocaCard({
 
 });
 
-
-
 // ============================================================
 
 // HOOK — TROCAS (cache-first + SWR)
 
 // ============================================================
-
-
 
 function useTrocas() {
 
@@ -687,8 +613,6 @@ function useTrocas() {
   const [loading, setLoading] = useState(true);
 
   const [usuarioLogado, setUsuarioLogado] = useState<number | null>(null);
-
-
 
   const trocasRef = useRef<Troca[]>([]);
 
@@ -704,8 +628,6 @@ function useTrocas() {
 
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
 
-
-
   // Sincroniza ref
 
   useEffect(() => {
@@ -713,8 +635,6 @@ function useTrocas() {
     trocasRef.current = trocas;
 
   }, [trocas]);
-
-
 
   // AppState
 
@@ -730,15 +650,11 @@ function useTrocas() {
 
   }, []);
 
-
-
   // 1) Cache na montagem + usuário/token
 
   useEffect(() => {
 
     let ativo = true;
-
-
 
     (async () => {
 
@@ -752,15 +668,9 @@ function useTrocas() {
 
       ]);
 
-
-
       if (!ativo) return;
 
-
-
       tokenRef.current = token;
-
-
 
       if (usuarioStorage) {
 
@@ -782,8 +692,6 @@ function useTrocas() {
 
       }
 
-
-
       if (cached && cached.length > 0) {
 
         trocasRef.current = cached;
@@ -798,8 +706,6 @@ function useTrocas() {
 
     })();
 
-
-
     return () => {
 
       ativo = false;
@@ -808,8 +714,6 @@ function useTrocas() {
 
   }, []);
 
-
-
   // 2) Fetch
 
   const carregarTrocas = useCallback(
@@ -817,8 +721,6 @@ function useTrocas() {
     async (mostrarLoading = false, forcar = false, signal?: AbortSignal) => {
 
       if (carregandoRef.current) return;
-
-
 
       if (
 
@@ -834,15 +736,11 @@ function useTrocas() {
 
       }
 
-
-
       // Precisa de token + usuário
 
       let token = tokenRef.current;
 
       let idUsuario = usuarioRef.current;
-
-
 
       if (!token || !idUsuario) {
 
@@ -854,13 +752,9 @@ function useTrocas() {
 
         ]);
 
-
-
         token = tokenStorage;
 
         tokenRef.current = tokenStorage;
-
-
 
         if (usuarioStorage) {
 
@@ -886,8 +780,6 @@ function useTrocas() {
 
       }
 
-
-
       if (!token || !idUsuario) {
 
         setLoading(false);
@@ -896,13 +788,9 @@ function useTrocas() {
 
       }
 
-
-
       carregandoRef.current = true;
 
       if (mostrarLoading && !loadedRef.current) setLoading(true);
-
-
 
       try {
 
@@ -922,11 +810,7 @@ function useTrocas() {
 
         });
 
-
-
         if (signal?.aborted) return;
-
-
 
         const propostas = Array.isArray(response.data?.propostas)
 
@@ -934,15 +818,11 @@ function useTrocas() {
 
           : [];
 
-
-
         const formatadas: Troca[] = propostas.map((p: any) =>
 
           formatarTroca(p, idUsuario!)
 
         );
-
-
 
         setTrocas(formatadas);
 
@@ -990,8 +870,6 @@ function useTrocas() {
 
   );
 
-
-
   // 3) Primeiro fetch
 
   useEffect(() => {
@@ -1003,8 +881,6 @@ function useTrocas() {
     return () => ctrl.abort();
 
   }, [carregarTrocas]);
-
-
 
   // 4) Refresh em foco (throttled)
 
@@ -1018,8 +894,6 @@ function useTrocas() {
 
       if (appStateRef.current !== "active") return;
 
-
-
       const ctrl = new AbortController();
 
       carregarTrocas(false, false, ctrl.signal);
@@ -1029,8 +903,6 @@ function useTrocas() {
     }, [carregarTrocas])
 
   );
-
-
 
   // 5) Atualização local otimista
 
@@ -1062,8 +934,6 @@ function useTrocas() {
 
   );
 
-
-
   const recarregar = useCallback(
 
     (forcar = true) => carregarTrocas(false, forcar),
@@ -1071,8 +941,6 @@ function useTrocas() {
     [carregarTrocas]
 
   );
-
-
 
   return {
 
@@ -1090,21 +958,15 @@ function useTrocas() {
 
 }
 
-
-
 // ============================================================
 
 // TELA
 
 // ============================================================
 
-
-
 export default function TrocasScreen() {
 
   const router = useRouter();
-
-
 
   const {
 
@@ -1120,27 +982,27 @@ export default function TrocasScreen() {
 
   } = useTrocas();
 
-
-
   const [activeTab, setActiveTab] = useState<
 
     "TODAS" | "RECEBIDAS" | "ENVIADAS"
 
   >("TODAS");
 
-
-
   const [limiteVisivel, setLimiteVisivel] = useState(LIMITE_INICIAL);
 
   const [erroAcao, setErroAcao] = useState("");
+
   const [acaoEmAndamento, setAcaoEmAndamento] = useState<number | null>(null);
+
   const [confirmacaoTroca, setConfirmacaoTroca] = useState<{
+
     visivel: boolean;
+
     id: number | null;
-    tipo: "A" | "R" | null;
+
+    tipo: "A" | "R" | "C" | null;
+
   }>({ visivel: false, id: null, tipo: null });
-
-
 
   // Reset limite ao trocar aba
 
@@ -1149,8 +1011,6 @@ export default function TrocasScreen() {
     setLimiteVisivel(LIMITE_INICIAL);
 
   }, [activeTab]);
-
-
 
   // Filtros
 
@@ -1170,8 +1030,6 @@ export default function TrocasScreen() {
 
   }, [trocas, activeTab, usuarioLogado]);
 
-
-
   const trocasVisiveis = useMemo(
 
     () => trocasFiltradas.slice(0, limiteVisivel),
@@ -1180,11 +1038,7 @@ export default function TrocasScreen() {
 
   );
 
-
-
   const temMais = trocasFiltradas.length > limiteVisivel;
-
-
 
   // ==========================================================
 
@@ -1192,112 +1046,194 @@ export default function TrocasScreen() {
 
   // ==========================================================
 
-
-
   const handleAlterarStatus = useCallback(
+
     async (id: number, status: "A" | "R") => {
+
       if (acaoEmAndamento !== null) return;
 
       const statusAnterior =
+
         trocas.find((troca) => troca.id === id)?.status || "PENDENTE";
 
       try {
+
         setErroAcao("");
+
         setAcaoEmAndamento(id);
 
         atualizarStatusLocal(
+
           id,
+
           status === "A" ? "ACEITA" : "RECUSADA"
+
         );
 
         const token = await AsyncStorage.getItem("token");
 
         if (!token) {
+
           atualizarStatusLocal(id, statusAnterior);
+
           const mensagem = "Sua sessão expirou. Faça login novamente.";
+
           setErroAcao(mensagem);
 
           if (Platform.OS === "web") window.alert(mensagem);
+
           else Alert.alert("Login necessário", mensagem);
+
           return;
+
         }
 
         const response = await api.put(
+
           `/propostas/${id}/status`,
+
           { st_troca: status },
+
           {
+
             headers: {
+
               Accept: "application/json",
+
               Authorization: `Bearer ${token}`,
+
             },
+
             timeout: TEMPO_LIMITE_REQUISICAO,
+
           }
+
         );
 
         const mensagem =
+
           response?.data?.message ||
+
           (status === "A"
+
             ? "A proposta de troca foi aceita."
+
             : "A proposta de troca foi recusada.");
 
         if (Platform.OS === "web") window.alert(mensagem);
+
         else {
+
           Alert.alert(
+
             status === "A" ? "Troca aceita!" : "Troca recusada!",
+
             mensagem
+
           );
+
         }
+
       } catch (error: any) {
+
         atualizarStatusLocal(id, statusAnterior);
 
         const mensagem =
+
           error?.response?.data?.message ||
+
           error?.response?.data?.errors?.st_troca?.[0] ||
+
           error?.message ||
+
           "Não foi possível alterar o status da troca.";
 
         console.error("ERRO AO ALTERAR STATUS DA TROCA:", {
+
           id,
+
           status,
+
           httpStatus: error?.response?.status,
+
           data: error?.response?.data,
+
           error,
+
         });
 
         setErroAcao(mensagem);
 
         if (Platform.OS === "web") window.alert(mensagem);
+
         else Alert.alert("Erro", mensagem);
+
       } finally {
+
         setAcaoEmAndamento(null);
+
       }
+
     },
+
     [acaoEmAndamento, atualizarStatusLocal, trocas]
+
   );
 
   const fecharConfirmacaoTroca = useCallback(() => {
+
     if (acaoEmAndamento !== null) return;
-    setConfirmacaoTroca({ visivel: false, id: null, tipo: null });
+
+    setConfirmacaoTroca((atual) => ({ ...atual, visivel: false }));
+
   }, [acaoEmAndamento]);
 
   const confirmarAcaoTroca = useCallback(async () => {
+
     const { id, tipo } = confirmacaoTroca;
+
     if (!id || !tipo || acaoEmAndamento !== null) return;
 
+    // UC27 — SOMENTE VISUAL:
+    // ao confirmar o cancelamento, o modal apenas fecha.
+    // Nenhum status é alterado e nenhuma requisição é enviada.
+    if (tipo === "C") {
+
+      setConfirmacaoTroca((atual) => ({ ...atual, visivel: false }));
+
+      return;
+
+    }
+
     await handleAlterarStatus(id, tipo);
-    setConfirmacaoTroca({ visivel: false, id: null, tipo: null });
+
+    setConfirmacaoTroca((atual) => ({ ...atual, visivel: false }));
+
   }, [acaoEmAndamento, confirmacaoTroca, handleAlterarStatus]);
 
   const handleAceitarTroca = useCallback((id: number) => {
+
     if (acaoEmAndamento !== null) return;
+
     setConfirmacaoTroca({ visivel: true, id, tipo: "A" });
+
   }, [acaoEmAndamento]);
 
   const handleRecusarTroca = useCallback((id: number) => {
+
     if (acaoEmAndamento !== null) return;
+
     setConfirmacaoTroca({ visivel: true, id, tipo: "R" });
+
   }, [acaoEmAndamento]);
 
+  const handleCancelarSolicitacao = useCallback((id: number) => {
+
+    if (acaoEmAndamento !== null) return;
+
+    setConfirmacaoTroca({ visivel: true, id, tipo: "C" });
+
+  }, [acaoEmAndamento]);
 
   const abrirProduto = useCallback(
 
@@ -1319,8 +1255,6 @@ export default function TrocasScreen() {
 
   );
 
-
-
   const abrirPerfil = useCallback(
 
     (idUsuario: number) => {
@@ -1338,8 +1272,6 @@ export default function TrocasScreen() {
     [router]
 
   );
-
-
 
   const abrirChat = useCallback(
 
@@ -1359,23 +1291,17 @@ export default function TrocasScreen() {
 
   );
 
-
-
   const carregarMais = useCallback(() => {
 
     setLimiteVisivel((v) => v + LIMITE_INICIAL);
 
   }, []);
 
-
-
   // ==========================================================
 
   // RENDER ITEM (memoizado via useCallback)
 
   // ==========================================================
-
-
 
   const renderTrade = useCallback(
 
@@ -1384,8 +1310,6 @@ export default function TrocasScreen() {
       const podeResponder = item.idDestinatario === usuarioLogado;
 
       const fotoPerfilUrl = getImageUrl(item.fotoOutroUsuario);
-
-
 
       return (
 
@@ -1419,8 +1343,6 @@ export default function TrocasScreen() {
 
             </View>
 
-
-
             <View style={styles.otherUserText}>
 
               <Text style={styles.tradeWithLabel}>Troca com</Text>
@@ -1438,8 +1360,6 @@ export default function TrocasScreen() {
               </View>
 
             </View>
-
-
 
             <TouchableOpacity
 
@@ -1459,11 +1379,7 @@ export default function TrocasScreen() {
 
           </View>
 
-
-
           <View style={styles.headerDivider} />
-
-
 
           {/* PRODUTOS */}
 
@@ -1479,8 +1395,6 @@ export default function TrocasScreen() {
 
             />
 
-
-
             <View style={styles.exchangeDivider}>
 
               <View style={styles.exchangeLine} />
@@ -1495,8 +1409,6 @@ export default function TrocasScreen() {
 
             </View>
 
-
-
             <ProdutoTrocaCard
 
               produto={item.meuProduto}
@@ -1509,8 +1421,6 @@ export default function TrocasScreen() {
 
           </View>
 
-
-
           {/* PENDENTE - RECEBIDA */}
 
           {item.status === "PENDENTE" && podeResponder && (
@@ -1522,8 +1432,6 @@ export default function TrocasScreen() {
                 Deseja aceitar esta proposta?
 
               </Text>
-
-
 
               <View style={styles.pendingActionsRow}>
 
@@ -1542,8 +1450,6 @@ export default function TrocasScreen() {
                   <Text style={styles.rejectBtnText}>Recusar</Text>
 
                 </TouchableOpacity>
-
-
 
                 <TouchableOpacity
 
@@ -1567,26 +1473,51 @@ export default function TrocasScreen() {
 
           )}
 
-
-
-          {/* PENDENTE - ENVIADA */}
+          {/* PENDENTE - ENVIADA | UC27 - CANCELAR SOLICITAÇÃO */}
 
           {item.status === "PENDENTE" && !podeResponder && (
 
-            <View style={styles.waitingInfoBox}>
+            <View>
 
-              <Feather name="clock" size={15} color="#856404" />
+              <View style={styles.waitingInfoBox}>
 
-              <Text style={styles.waitingInfoText}>
+                <Feather name="clock" size={15} color="#856404" />
 
-                Aguardando resposta de {item.usuarioProposta}
+                <Text style={styles.waitingInfoText}>
 
-              </Text>
+                  Aguardando resposta de {item.usuarioProposta}
+
+                </Text>
+
+              </View>
+
+              {!confirmacaoTroca.visivel && (
+
+                <TouchableOpacity
+
+                  style={styles.cancelRequestButton}
+
+                  onPress={() => handleCancelarSolicitacao(item.id)}
+
+                  activeOpacity={0.8}
+
+                >
+
+                  <Feather name="x-circle" size={17} color="#B42318" />
+
+                  <Text style={styles.cancelRequestButtonText}>
+
+                    Cancelar solicitação
+
+                  </Text>
+
+                </TouchableOpacity>
+
+              )}
 
             </View>
 
           )}
-
 
 
           {/* ACEITA */}
@@ -1608,8 +1539,6 @@ export default function TrocasScreen() {
                 </Text>
 
               </View>
-
-
 
               <TouchableOpacity
 
@@ -1635,8 +1564,6 @@ export default function TrocasScreen() {
 
           )}
 
-
-
           {/* FINALIZADA */}
 
           {item.status === "FINALIZADA" && (
@@ -1654,8 +1581,6 @@ export default function TrocasScreen() {
             </View>
 
           )}
-
-
 
           {/* RECUSADA */}
 
@@ -1695,11 +1620,13 @@ export default function TrocasScreen() {
 
       handleRecusarTroca,
 
+      handleCancelarSolicitacao,
+
+      confirmacaoTroca.visivel,
+
     ]
 
   );
-
-
 
   // ==========================================================
 
@@ -1707,69 +1634,115 @@ export default function TrocasScreen() {
 
   // ==========================================================
 
-
-
   const showSkeleton = loading && trocas.length === 0;
 
-
-
   return (
+
     <>
+
       <Modal
+
         visible={confirmacaoTroca.visivel}
+
         transparent
+
         animationType="fade"
+
         onRequestClose={fecharConfirmacaoTroca}
+
       >
+
         <View style={styles.confirmacaoOverlay}>
+
           <View style={styles.confirmacaoCard}>
-            <View style={styles.confirmacaoIcone}>
-              <Ionicons
-                name={confirmacaoTroca.tipo === "A" ? "checkmark-circle-outline" : "close-circle-outline"}
-                size={34}
-                color="#0099FF"
-              />
-            </View>
 
             <Text style={styles.confirmacaoTitulo}>
-              {confirmacaoTroca.tipo === "A" ? "Aceitar proposta" : "Recusar proposta"}
+
+              {confirmacaoTroca.tipo === "A"
+                ? "Aceitar proposta"
+                : confirmacaoTroca.tipo === "C"
+                ? "Cancelar solicitação"
+                : "Recusar proposta"}
+
             </Text>
 
             <Text style={styles.confirmacaoTexto}>
+
               {confirmacaoTroca.tipo === "A"
+
                 ? "Tem certeza de que deseja aceitar esta proposta de troca?"
+
+                : confirmacaoTroca.tipo === "C"
+
+                ? "Tem certeza de que deseja cancelar esta solicitação de troca?"
+
                 : "Tem certeza de que deseja recusar esta proposta de troca?"}
+
             </Text>
 
             <View style={styles.confirmacaoAcoes}>
+
               <TouchableOpacity
+
                 style={styles.confirmacaoCancelar}
+
                 onPress={fecharConfirmacaoTroca}
+
                 disabled={acaoEmAndamento !== null}
+
                 activeOpacity={0.8}
+
               >
-                <Text style={styles.confirmacaoCancelarTexto}>Cancelar</Text>
+
+                <Text style={styles.confirmacaoCancelarTexto}>
+                  {confirmacaoTroca.tipo === "C" ? "Voltar" : "Cancelar"}
+                </Text>
+
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.confirmacaoConfirmar}
-                onPress={() => void confirmarAcaoTroca()}
-                disabled={acaoEmAndamento !== null}
-                activeOpacity={0.8}
-              >
-                {acaoEmAndamento !== null ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.confirmacaoConfirmarTexto}>
-                    {confirmacaoTroca.tipo === "A" ? "Aceitar troca" : "Recusar"}
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
 
+                style={[
+                  styles.confirmacaoConfirmar,
+                  confirmacaoTroca.tipo === "C" &&
+                    styles.confirmacaoConfirmarCancelamento,
+                ]}
+
+                onPress={() => void confirmarAcaoTroca()}
+
+                disabled={acaoEmAndamento !== null}
+
+                activeOpacity={0.8}
+
+              >
+
+                {acaoEmAndamento !== null ? (
+
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+
+                ) : (
+
+                  <Text style={styles.confirmacaoConfirmarTexto}>
+
+                    {confirmacaoTroca.tipo === "A"
+                      ? "Aceitar troca"
+                      : confirmacaoTroca.tipo === "C"
+                      ? "Sim, cancelar"
+                      : "Recusar"}
+
+                  </Text>
+
+                )}
+
+              </TouchableOpacity>
+
+            </View>
+
+          </View>
+
+        </View>
+
+      </Modal>
 
     <View style={styles.mainContainer}>
 
@@ -1785,17 +1758,11 @@ export default function TrocasScreen() {
 
         <View style={styles.header}>
 
-          <Text style={styles.headerTitle}>Minhas Trocas</Text>
+          <Text style={styles.headerTitle}>Minhas trocas</Text>
 
-          <Text style={styles.headerSubtitle}>
-
-            Acompanhe e gerencie suas propostas de troca
-
-          </Text>
+         
 
         </View>
-
-
 
         {/* ABAS */}
 
@@ -1833,8 +1800,6 @@ export default function TrocasScreen() {
 
         </View>
 
-
-
         {/* ERRO DE AÇÃO */}
 
         {erroAcao ? (
@@ -1848,8 +1813,6 @@ export default function TrocasScreen() {
           </View>
 
         ) : null}
-
-
 
         {/* LISTA */}
 
@@ -1893,8 +1856,6 @@ export default function TrocasScreen() {
 
               {trocasVisiveis.map(renderTrade)}
 
-
-
               {temMais && (
 
                 <TouchableOpacity
@@ -1928,13 +1889,12 @@ export default function TrocasScreen() {
       </ScrollView>
 
     </View>
+
     </>
 
   );
 
 }
-
-
 
 // ============================================================
 
@@ -1942,15 +1902,11 @@ export default function TrocasScreen() {
 
 // ============================================================
 
-
-
 const styles = StyleSheet.create({
 
   mainContainer: { flex: 1, backgroundColor: "#FFFFFF" },
 
   container: { flex: 1, backgroundColor: "#FFFFFF" },
-
-
 
   // ============ CABEÇALHO ============
 
@@ -1958,7 +1914,7 @@ const styles = StyleSheet.create({
 
     paddingHorizontal: 20,
 
-    paddingTop: 45,
+    paddingTop: 27,
 
     paddingBottom: 10,
 
@@ -1966,27 +1922,16 @@ const styles = StyleSheet.create({
 
   headerTitle: {
 
-    fontSize: 22,
+    fontSize: 18,
 
     fontFamily: "Montserrat_700Bold",
 
     color: "#005386",
 
+    textAlign: "center",
   },
 
-  headerSubtitle: {
-
-    fontSize: 13,
-
-    fontFamily: "Montserrat_400Regular",
-
-    color: "#777777",
-
-    marginTop: 3,
-
-  },
-
-
+ 
 
   // ============ ABAS ============
 
@@ -2046,8 +1991,6 @@ const styles = StyleSheet.create({
 
   activeTabText: { color: "#005386" },
 
-
-
   // ============ ERRO AÇÃO ============
 
   erroAcaoBox: {
@@ -2088,8 +2031,6 @@ const styles = StyleSheet.create({
 
   },
 
-
-
   // ============ LISTA ============
 
   cardsContainer: {
@@ -2101,8 +2042,6 @@ const styles = StyleSheet.create({
     paddingBottom: 30,
 
   },
-
-
 
   // ============ EMPTY ============
 
@@ -2158,8 +2097,6 @@ const styles = StyleSheet.create({
 
   },
 
-
-
   // ============ LOAD MORE ============
 
   loadMoreButton: {
@@ -2196,8 +2133,6 @@ const styles = StyleSheet.create({
 
   },
 
-
-
   // ============ CARD ============
 
   tradeCard: {
@@ -2225,8 +2160,6 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
 
   },
-
-
 
   // ============ PERFIL ============
 
@@ -2350,8 +2283,6 @@ const styles = StyleSheet.create({
 
   },
 
-
-
   // ============ STATUS ============
 
   statusBadge: {
@@ -2385,8 +2316,6 @@ const styles = StyleSheet.create({
   finishedBadge: { backgroundColor: "#E2F0D9" },
 
   rejectedBadge: { backgroundColor: "#F8D7DA" },
-
-
 
   // ============ ÁREA DA TROCA ============
 
@@ -2590,8 +2519,6 @@ const styles = StyleSheet.create({
 
   },
 
-
-
   // ============ DIVISOR ============
 
   exchangeDivider: {
@@ -2631,8 +2558,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
 
   },
-
-
 
   // ============ AÇÕES ============
 
@@ -2694,7 +2619,43 @@ const styles = StyleSheet.create({
 
   },
 
+  // ============ CANCELAR SOLICITAÇÃO ============
 
+  cancelRequestButton: {
+
+    minHeight: 42,
+
+    marginTop: 9,
+
+    borderRadius: 10,
+
+    borderWidth: 1,
+
+    borderColor: "#F0B8B4",
+
+    backgroundColor: "#FFF7F6",
+
+    flexDirection: "row",
+
+    alignItems: "center",
+
+    justifyContent: "center",
+
+    paddingHorizontal: 12,
+
+  },
+
+  cancelRequestButtonText: {
+
+    marginLeft: 7,
+
+    fontSize: 12,
+
+    color: "#B42318",
+
+    fontFamily: "Montserrat_600SemiBold",
+
+  },
 
   // ============ AGUARDANDO ============
 
@@ -2730,8 +2691,6 @@ const styles = StyleSheet.create({
 
   },
 
-
-
   // ============ ACEITA ============
 
   acceptedInfoBox: {
@@ -2766,8 +2725,6 @@ const styles = StyleSheet.create({
 
   },
 
-
-
   // ============ CHAT ============
 
   chatActionButton: {
@@ -2797,8 +2754,6 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
 
   },
-
-
 
   // ============ FINALIZADA ============
 
@@ -2832,8 +2787,6 @@ const styles = StyleSheet.create({
 
   },
 
-
-
   // ============ RECUSADA ============
 
   rejectedInfoBox: {
@@ -2866,8 +2819,6 @@ const styles = StyleSheet.create({
 
   },
 
-
-
   // ============ SKELETON ============
 
   skeletonBlock: { backgroundColor: "#EAF3FA" },
@@ -2880,85 +2831,170 @@ const styles = StyleSheet.create({
 
   },
 
-
   confirmacaoOverlay: {
+
     flex: 1,
+
     backgroundColor: "rgba(0, 0, 0, 0.45)",
+
     alignItems: "center",
+
     justifyContent: "center",
+
     paddingHorizontal: 24,
+
   },
+
   confirmacaoCard: {
+
     width: "100%",
+
     maxWidth: 390,
+
     backgroundColor: "#FFFFFF",
+
     borderRadius: 22,
+
     paddingHorizontal: 24,
+
     paddingTop: 26,
+
     paddingBottom: 22,
+
     alignItems: "center",
+
     shadowColor: "#000000",
+
     shadowOffset: { width: 0, height: 8 },
+
     shadowOpacity: 0.18,
+
     shadowRadius: 18,
+
     elevation: 10,
+
   },
+
   confirmacaoIcone: {
+
     width: 62,
+
     height: 62,
+
     borderRadius: 31,
+
     backgroundColor: "#EAF6FF",
+
     alignItems: "center",
+
     justifyContent: "center",
+
     marginBottom: 16,
+
   },
+
   confirmacaoTitulo: {
+
     fontSize: 19,
+
     fontFamily: "Montserrat_700Bold",
+
     color: "#17324D",
+
     textAlign: "center",
+
     marginBottom: 9,
+
   },
+
   confirmacaoTexto: {
+
     fontSize: 14,
+
     lineHeight: 21,
+
     fontFamily: "Montserrat_400Regular",
+
     color: "#667788",
+
     textAlign: "center",
+
     marginBottom: 24,
+
   },
+
   confirmacaoAcoes: {
+
     width: "100%",
+
     flexDirection: "row",
+
     gap: 10,
+
   },
+
   confirmacaoCancelar: {
+
     flex: 1,
+
     minHeight: 46,
+
     borderRadius: 12,
+
     borderWidth: 1,
+
     borderColor: "#DCE6EF",
+
     backgroundColor: "#FFFFFF",
+
     alignItems: "center",
+
     justifyContent: "center",
+
   },
+
   confirmacaoCancelarTexto: {
+
     fontSize: 14,
+
     fontFamily: "Montserrat_600SemiBold",
+
     color: "#5B6B7A",
+
   },
+
   confirmacaoConfirmar: {
+
     flex: 1,
+
     minHeight: 46,
+
     borderRadius: 12,
+
     backgroundColor: "#0099FF",
+
     alignItems: "center",
+
     justifyContent: "center",
+
   },
+
+  confirmacaoConfirmarCancelamento: {
+
+    backgroundColor: "#B42318",
+
+  },
+
   confirmacaoConfirmarTexto: {
+
     fontSize: 14,
+
     fontFamily: "Montserrat_600SemiBold",
+
     color: "#FFFFFF",
+
     textAlign: "center",
+
   },
+
 });
