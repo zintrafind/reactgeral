@@ -1,31 +1,32 @@
 import {
-  Feather,
-  MaterialCommunityIcons,
+    Feather,
+    MaterialCommunityIcons,
 } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
-  useLocalSearchParams,
-  useRouter,
+    useLocalSearchParams,
+    useRouter,
 } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React, {
-  useEffect,
-  useState,
+    useCallback,
+    useEffect,
+    useState,
 } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Dimensions,
-  FlatList,
-  Image,
-  Modal,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Dimensions,
+    FlatList,
+    Image,
+    Modal,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import {
-  SafeAreaView,
+    SafeAreaView,
 } from "react-native-safe-area-context";
 import api from "../../services/api";
 const { width } =
@@ -65,13 +66,12 @@ interface UserProfileData {
   rating: string;
   fotoPerfil: string | null;
   banner: string | null;
+  st_perfil_disponivel?: string | boolean | null;
 }
-type AvaliacaoLocal = {
-  id_proposta?: string | number;
-  id_usuario_avaliado?: string | number;
-  nota: number;
-  criado_em?: string;
-  comentario?: string | null;
+type ResumoAvaliacoes = {
+  media: string;
+  quantidade: number;
+  destaque: boolean;
 };
 type TabType =
   | "anuncios"
@@ -152,10 +152,14 @@ export default function VisualizarPerfilScreen() {
     useState<TabType>(
       "anuncios"
     );
-  /* ==============================================================
-     UC39 — VISUALIZAR AVALIAÇÕES — SOMENTE FRONT-END
-  ============================================================== */
-  const [avaliacoes, setAvaliacoes] = useState<AvaliacaoLocal[]>([]);
+    /* ==============================================================
+      UC39 — VISUALIZAR AVALIAÇÕES
+    ============================================================== */
+    const [resumoAvaliacoes, setResumoAvaliacoes] = useState<ResumoAvaliacoes>({
+     media: "0.0",
+     quantidade: 0,
+      destaque: false,
+    });
   /* ==============================================================
      BLOQUEIO
   ============================================================== */
@@ -290,6 +294,8 @@ export default function VisualizarPerfilScreen() {
               usuario?.ds_banner ||
               usuario?.banner ||
               null,
+            st_perfil_disponivel:
+              usuario?.st_perfil_disponivel ?? "A",
           });
         } catch (
           error: any
@@ -302,12 +308,35 @@ export default function VisualizarPerfilScreen() {
       };
     carregarPerfil();
   }, [idParametro]);
-  useEffect(() => {
-    if (!idParametro) return;
-    carregarAvaliacoes();
-    // Somente front-end: lê as avaliações locais criadas no UC38.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  const carregarAvaliacoes = useCallback(async () => {
+    const idAvaliado = Number(idParametro || 0);
+    if (!idAvaliado) {
+      setResumoAvaliacoes({ media: "0.0", quantidade: 0, destaque: false });
+      return;
+    }
+
+    try {
+      const token = await AsyncStorage.getItem("token");
+      const response = await api.get(`/usuarios/${idAvaliado}/avaliacoes`, {
+        headers: {
+          Accept: "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+
+      setResumoAvaliacoes({
+        media: Number(response.data?.media ?? 0).toFixed(1),
+        quantidade: Number(response.data?.quantidade ?? 0),
+        destaque: response.data?.destaque === true,
+      });
+    } catch {
+      setResumoAvaliacoes({ media: "0.0", quantidade: 0, destaque: false });
+    }
   }, [idParametro]);
+
+  useEffect(() => {
+    void carregarAvaliacoes();
+  }, [carregarAvaliacoes]);
   /* ==============================================================
      CARREGAR PRODUTOS DO USUÁRIO
   ============================================================== */
@@ -374,45 +403,6 @@ export default function VisualizarPerfilScreen() {
       };
     carregarProdutos();
   }, [idParametro]);
-  /* ==============================================================
-     UC39 — CARREGAR AVALIAÇÕES LOCAIS
-  ============================================================== */
-  const carregarAvaliacoes = async () => {
-    try {
-      const idAvaliado = Number(user.id_usuario || idParametro || 0);
-      if (!idAvaliado) {
-        setAvaliacoes([]);
-        return;
-      }
-      const todasAsChaves = await AsyncStorage.getAllKeys();
-      const chavesAvaliacoes = todasAsChaves.filter((chave) =>
-        chave.startsWith("@pecapeca:avaliacao_visual:")
-      );
-      if (chavesAvaliacoes.length === 0) {
-        setAvaliacoes([]);
-        return;
-      }
-      const registros = await AsyncStorage.multiGet(chavesAvaliacoes);
-      const encontradas: AvaliacaoLocal[] = registros
-        .map(([, valor]) => {
-          try {
-            return valor ? (JSON.parse(valor) as AvaliacaoLocal) : null;
-          } catch {
-            return null;
-          }
-        })
-        .filter(
-          (item): item is AvaliacaoLocal =>
-            !!item &&
-            Number(item.id_usuario_avaliado) === idAvaliado &&
-            Number(item.nota) >= 1 &&
-            Number(item.nota) <= 5
-        );
-      setAvaliacoes(encontradas);
-    } catch {
-      setAvaliacoes([]);
-    }
-  };
   const abrirAvaliacoes = () => {
     const idUsuarioAvaliado = Number(user.id_usuario || idParametro || 0);
     if (!idUsuarioAvaliado) {
@@ -427,13 +417,6 @@ export default function VisualizarPerfilScreen() {
       },
     } as any);
   };
-  const mediaAvaliacoes =
-    avaliacoes.length > 0
-      ? (
-          avaliacoes.reduce((total, item) => total + Number(item.nota), 0) /
-          avaliacoes.length
-        ).toFixed(1)
-      : "0.0";
   /* ==============================================================
      ABRIR MODAL DE BLOQUEIO
   ============================================================== */
@@ -687,6 +670,19 @@ export default function VisualizarPerfilScreen() {
     getImageUrl(
       user.banner
     );
+  const perfilDisponivel = (() => {
+    const valor = user.st_perfil_disponivel;
+    if (valor === null || valor === undefined) return true;
+    if (typeof valor === "boolean") return valor;
+    const valorNormalizado = String(valor).trim().toUpperCase();
+    if (["A", "TRUE", "1", "SIM", "S", "DISPONIVEL", "AVAILABLE"].includes(valorNormalizado)) {
+      return true;
+    }
+    if (["I", "FALSE", "0", "NAO", "N", "INDISPONIVEL", "UNAVAILABLE"].includes(valorNormalizado)) {
+      return false;
+    }
+    return true;
+  })();
   /* ==============================================================
      CONDIÇÃO DO PRODUTO
   ============================================================== */
@@ -1037,6 +1033,31 @@ export default function VisualizarPerfilScreen() {
               </Text>
 
               <View
+                style={[
+                  styles.statusPill,
+                  perfilDisponivel
+                    ? styles.statusPillDisponivel
+                    : styles.statusPillIndisponivel,
+                ]}
+              >
+                <Feather
+                  name={perfilDisponivel ? "check-circle" : "slash"}
+                  size={14}
+                  color={perfilDisponivel ? "#28A745" : "#D9534F"}
+                />
+                <Text
+                  style={[
+                    styles.statusPillText,
+                    { color: perfilDisponivel ? "#28A745" : "#D9534F" },
+                  ]}
+                >
+                  {perfilDisponivel
+                    ? "Disponível para trocas"
+                    : "Indisponível para trocas"}
+                </Text>
+              </View>
+
+              <View
                 style={
                   styles.addressRow
                 }
@@ -1064,12 +1085,20 @@ export default function VisualizarPerfilScreen() {
               <View style={styles.ratingSummaryLeft}>
                 <Feather name="star" size={19} color="#005386" />
                 <Text style={styles.ratingText}>
-                  {avaliacoes.length > 0 ? mediaAvaliacoes : "Sem avaliações"}
+                  {resumoAvaliacoes.quantidade > 0
+                    ? resumoAvaliacoes.media
+                    : "Sem avaliações"}
                 </Text>
-                {avaliacoes.length > 0 ? (
+                {resumoAvaliacoes.quantidade > 0 ? (
                   <Text style={styles.ratingCountText}>
-                    ({avaliacoes.length} {avaliacoes.length === 1 ? "avaliação" : "avaliações"})
+                    ({resumoAvaliacoes.quantidade} {resumoAvaliacoes.quantidade === 1 ? "avaliação" : "avaliações"})
                   </Text>
+                ) : null}
+                {resumoAvaliacoes.destaque ? (
+                  <View style={styles.wellRatedBadge}>
+                    <Feather name="award" size={12} color="#005386" />
+                    <Text style={styles.wellRatedBadgeText}>Usuário bem avaliado</Text>
+                  </View>
                 ) : null}
               </View>
               <View style={styles.ratingLinkRow}>
@@ -1640,6 +1669,30 @@ const styles =
       fontSize: 19,
       color: "#005386",
     },
+    statusPill: {
+      flexDirection: "row",
+      alignItems: "center",
+      alignSelf: "flex-start",
+      marginTop: 8,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 999,
+      borderWidth: 1,
+      backgroundColor: "#F4FBF7",
+    },
+    statusPillDisponivel: {
+      borderColor: "#B7E4C7",
+      backgroundColor: "#F4FBF7",
+    },
+    statusPillIndisponivel: {
+      borderColor: "#F5C2C7",
+      backgroundColor: "#FFF4F4",
+    },
+    statusPillText: {
+      fontFamily: "Montserrat_600SemiBold",
+      fontSize: 11,
+      marginLeft: 6,
+    },
     addressRow: {
       flexDirection:
         "row",
@@ -1685,6 +1738,21 @@ const styles =
       fontSize: 14,
       color: "#005386",
       marginLeft: 8,
+    },
+    wellRatedBadge: {
+      flexDirection: "row",
+      alignItems: "center",
+      marginLeft: 8,
+      paddingHorizontal: 7,
+      paddingVertical: 3,
+      borderRadius: 10,
+      backgroundColor: "#FFF7D6",
+    },
+    wellRatedBadgeText: {
+      marginLeft: 4,
+      fontFamily: "Montserrat_600SemiBold",
+      fontSize: 10,
+      color: "#805B00",
     },
     /* ============================================================
        ABAS

@@ -3,26 +3,26 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { Href } from "expo-router";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, {
-  memo,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
+    memo,
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
 } from "react";
 import type { ImageSourcePropType, ViewStyle } from "react-native";
 import {
-  ActivityIndicator,
-  FlatList,
-  Image,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  useWindowDimensions,
-  View,
+    ActivityIndicator,
+    FlatList,
+    Image,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    useWindowDimensions,
+    View,
 } from "react-native";
 import api from "../../services/api.js";
 const HORIZONTAL_PADDING = 32;
@@ -34,12 +34,6 @@ const REQUEST_TIMEOUT = 15000;
 const PRODUCTS_CACHE_KEY = "@pecapeca:products_cache_v2";
 const CACHE_MAX_AGE = 6 * 60 * 60 * 1000;
 
-const AVALIACAO_PREFIX = "@pecapeca:avaliacao_visual:";
-
-// Critério LOCAL do UC41 para demonstração no front-end.
-// Pode ser alterado depois conforme a regra oficial do sistema.
-const NOTA_MINIMA_DESTAQUE = 4.0;
-const MINIMO_AVALIACOES_DESTAQUE = 2;
 type Banner = {
   id: string;
   label: string;
@@ -95,16 +89,10 @@ const CARD_SHADOW: ViewStyle = Platform.select({
   ios: { shadowColor: "#005386", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.07, shadowRadius: 8 },
   default: { elevation: 2 },
 }) ?? {};
-type AvaliacaoLocal = {
-  id_usuario_avaliado?: number | string;
-  nota?: number;
-};
-
 type UsuarioBemAvaliado = {
   id_usuario: number;
   nome: string;
-  media: number;
-  quantidade: number;
+  foto_perfil?: string | null;
 };
 
 type ImagemProduto = {
@@ -120,8 +108,10 @@ interface Produto {
   ds_produto: string | null;
   st_condicao: string;
   st_status: string;
+  usuario_bem_avaliado?: boolean | number;
   user?: {
     nm_usuario: string;
+    ds_foto_perfil?: string | null;
   };
   images?: ImagemProduto[];
   imagens?: ImagemProduto[];
@@ -532,6 +522,13 @@ const WellRatedUserCard = memo(function WellRatedUserCard({
   item: UsuarioBemAvaliado;
   onPress: (item: UsuarioBemAvaliado) => void;
 }) {
+  const [falhaFoto, setFalhaFoto] = useState(false);
+  const fotoPerfilUrl = getImageUrl(item.foto_perfil);
+
+  useEffect(() => {
+    setFalhaFoto(false);
+  }, [fotoPerfilUrl]);
+
   return (
     <TouchableOpacity
       style={styles.wellRatedUserCard}
@@ -541,7 +538,16 @@ const WellRatedUserCard = memo(function WellRatedUserCard({
       accessibilityLabel={`Ver perfil de ${item.nome}`}
     >
       <View style={styles.wellRatedAvatar}>
-        <Feather name="user" size={25} color="#005386" />
+        {fotoPerfilUrl && !falhaFoto ? (
+          <Image
+            source={{ uri: fotoPerfilUrl }}
+            style={styles.wellRatedAvatarImage}
+            resizeMode="cover"
+            onError={() => setFalhaFoto(true)}
+          />
+        ) : (
+          <Feather name="user" size={25} color="#005386" />
+        )}
       </View>
 
       <Text style={styles.wellRatedName} numberOfLines={1}>
@@ -550,14 +556,8 @@ const WellRatedUserCard = memo(function WellRatedUserCard({
 
       <View style={styles.wellRatedScoreRow}>
         <Feather name="star" size={14} color="#005386" />
-        <Text style={styles.wellRatedScore}>
-          {item.media.toFixed(1)}
-        </Text>
+        <Text style={styles.wellRatedScore}>Perfil com destaque</Text>
       </View>
-
-      <Text style={styles.wellRatedCount}>
-        {item.quantidade} {item.quantidade === 1 ? "avaliação" : "avaliações"}
-      </Text>
 
       <View style={styles.wellRatedBadge}>
         <Feather name="award" size={12} color="#005386" />
@@ -755,89 +755,24 @@ export default function HomeScreen() {
         return;
       }
 
-      const todasAsChaves = await AsyncStorage.getAllKeys();
-      const chavesAvaliacoes = todasAsChaves.filter((chave) =>
-        chave.startsWith(AVALIACAO_PREFIX)
-      );
-
-      if (chavesAvaliacoes.length === 0) {
-        setUsuariosBemAvaliados([]);
-        return;
-      }
-
-      const registros = await AsyncStorage.multiGet(chavesAvaliacoes);
-
-      const avaliacoes = registros
-        .map(([, valor]) => {
-          try {
-            return valor ? (JSON.parse(valor) as AvaliacaoLocal) : null;
-          } catch {
-            return null;
-          }
-        })
-        .filter(
-          (item): item is AvaliacaoLocal =>
-            !!item &&
-            !!item.id_usuario_avaliado &&
-            Number(item.nota) >= 1 &&
-            Number(item.nota) <= 5
-        );
-
-      const usuariosDosAnuncios = new Map<number, string>();
+      const usuarios = new Map<number, UsuarioBemAvaliado>();
 
       products.forEach((produto) => {
+        if (produto.usuario_bem_avaliado !== true && Number(produto.usuario_bem_avaliado) !== 1) {
+          return;
+        }
+
         const idUsuario = Number(produto.id_usuario || 0);
+        if (!idUsuario || usuarios.has(idUsuario)) return;
 
-        if (!idUsuario) return;
-
-        const nome =
-          produto.user?.nm_usuario?.trim() ||
-          `Usuário ${idUsuario}`;
-
-        if (!usuariosDosAnuncios.has(idUsuario)) {
-          usuariosDosAnuncios.set(idUsuario, nome);
-        }
-      });
-
-      const destaques: UsuarioBemAvaliado[] = [];
-
-      usuariosDosAnuncios.forEach((nome, idUsuario) => {
-        const notasDoUsuario = avaliacoes
-          .filter(
-            (avaliacao) =>
-              Number(avaliacao.id_usuario_avaliado) === idUsuario
-          )
-          .map((avaliacao) => Number(avaliacao.nota));
-
-        if (notasDoUsuario.length < MINIMO_AVALIACOES_DESTAQUE) {
-          return;
-        }
-
-        const media =
-          notasDoUsuario.reduce((total, nota) => total + nota, 0) /
-          notasDoUsuario.length;
-
-        if (media < NOTA_MINIMA_DESTAQUE) {
-          return;
-        }
-
-        destaques.push({
+        usuarios.set(idUsuario, {
           id_usuario: idUsuario,
-          nome,
-          media,
-          quantidade: notasDoUsuario.length,
+          nome: produto.user?.nm_usuario?.trim() || `Usuário ${idUsuario}`,
+          foto_perfil: produto.user?.ds_foto_perfil || null,
         });
       });
 
-      destaques.sort((a, b) => {
-        if (b.media !== a.media) {
-          return b.media - a.media;
-        }
-
-        return b.quantidade - a.quantidade;
-      });
-
-      setUsuariosBemAvaliados(destaques.slice(0, 10));
+      setUsuariosBemAvaliados(Array.from(usuarios.values()).slice(0, 10));
     } catch {
       setUsuariosBemAvaliados([]);
     }
@@ -1459,9 +1394,16 @@ const styles = StyleSheet.create({
     backgroundColor: "#F1FAFF",
     borderWidth: 1,
     borderColor: "#DCEEFA",
+    overflow: "hidden",
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 9,
+  },
+
+  wellRatedAvatarImage: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
   },
 
   wellRatedName: {

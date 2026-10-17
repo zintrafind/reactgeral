@@ -7,7 +7,6 @@ import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
 
 import React, {
-
   memo,
 
   useCallback,
@@ -17,11 +16,9 @@ import React, {
   useRef,
 
   useState
-
 } from "react";
 
 import {
-
   ActivityIndicator,
 
   Alert,
@@ -53,7 +50,6 @@ import {
   TouchableOpacity,
 
   View,
-
 } from "react-native";
 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -763,6 +759,11 @@ export default function ChatScreen() {
 
   const [fotoProduto, setFotoProduto] = useState<string | null>(null);
 
+  const [resumoOferta, setResumoOferta] = useState<{
+    quantidade: number;
+    nomes: string[];
+  } | null>(null);
+
   const [tradeStatus, setTradeStatus] = useState<
 
     "em_andamento" | "confirmada_por_mim" | "concluida"
@@ -780,6 +781,8 @@ export default function ChatScreen() {
   // ==========================================================
   const [modalAvaliacaoVisivel, setModalAvaliacaoVisivel] = useState(false);
   const [notaAvaliacao, setNotaAvaliacao] = useState(0);
+  const [comentarioAvaliacao, setComentarioAvaliacao] = useState("");
+  const [enviandoAvaliacao, setEnviandoAvaliacao] = useState(false);
   const [erroAvaliacao, setErroAvaliacao] = useState("");
   const [avaliacaoRealizada, setAvaliacaoRealizada] = useState(false);
 
@@ -1040,14 +1043,24 @@ export default function ChatScreen() {
         }
 
         const itens = Array.isArray(proposta.itens) ? proposta.itens : [];
+        const itensOferecidos = itens.filter((item) => item.tp_item === "O");
 
-        const itemDoOutro = itens.find((item) => {
+        setResumoOferta(
+          itensOferecidos.length > 1
+            ? {
+                quantidade: itensOferecidos.length,
+                nomes: itensOferecidos.map(
+                  (item) => item.produto?.nm_produto || "Produto indisponível"
+                ),
+              }
+            : null
+        );
 
+        const itensDoOutro = itens.filter((item) => {
           const p = item.produto;
-
           return p && Number(p.id_usuario) !== Number(usuarioLogado);
-
         });
+        const itemDoOutro = itensDoOutro[0];
 
         if (itemDoOutro?.produto) {
 
@@ -1767,8 +1780,6 @@ const selecionarLocalizacao = useCallback(() => {
 
     });
 
-    setInputText("");
-
     setSendingMessage(true);
 
     try {
@@ -1910,6 +1921,8 @@ const selecionarLocalizacao = useCallback(() => {
         URL.revokeObjectURL(imagemSelecionada.uri);
 
       }
+
+      setInputText((atual) => atual === inputText ? "" : atual);
 
       setImagemSelecionada(null);
 
@@ -2072,6 +2085,7 @@ const selecionarLocalizacao = useCallback(() => {
         });
 
         setNotaAvaliacao(0);
+        setComentarioAvaliacao("");
         setErroAvaliacao("");
         setModalAvaliacaoVisivel(true);
         return;
@@ -2116,6 +2130,7 @@ const selecionarLocalizacao = useCallback(() => {
     if (tradeStatus !== "concluida" || avaliacaoRealizada) return;
 
     setNotaAvaliacao(0);
+    setComentarioAvaliacao("");
     setErroAvaliacao("");
     setModalAvaliacaoVisivel(true);
   }, [tradeStatus, avaliacaoRealizada]);
@@ -2126,44 +2141,80 @@ const selecionarLocalizacao = useCallback(() => {
   }, []);
 
   const enviarAvaliacao = useCallback(async () => {
+    const comentario = comentarioAvaliacao.trim();
+
     if (notaAvaliacao < 1 || notaAvaliacao > 5) {
       setErroAvaliacao("Selecione de 1 a 5 estrelas antes de enviar.");
       return;
     }
 
-    try {
-      // Somente front-end: salva localmente no dispositivo.
-      const chave = `@pecapeca:avaliacao_visual:${idProposta}:${usuarioLogado}`;
+    if (!comentario) {
+      setErroAvaliacao("Escreva um comentário antes de enviar.");
+      return;
+    }
 
-      await AsyncStorage.setItem(
-        chave,
-        JSON.stringify({
-          id_proposta: idProposta,
-          id_usuario_avaliado: idOutroUsuario,
-          nota: notaAvaliacao,
-          criado_em: new Date().toISOString(),
+    setEnviandoAvaliacao(true);
+
+    try {
+      let token = tokenRef.current;
+
+      if (!token) {
+        token = await AsyncStorage.getItem("token");
+        tokenRef.current = token;
+      }
+
+      if (!token) {
+        setErroAvaliacao("Faça login novamente para enviar sua avaliação.");
+        return;
+      }
+
+      const response = await fetch(`${API_URL}/api/avaliacoes`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          id_proposta: Number(idProposta),
+          nr_nota: Number(notaAvaliacao),
+          ds_comentario: comentario,
         }),
-      );
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setErroAvaliacao(
+          data?.errors?.ds_comentario?.[0] ||
+            data?.message ||
+            "Não foi possível enviar a avaliação."
+        );
+        return;
+      }
 
       setAvaliacaoRealizada(true);
       setModalAvaliacaoVisivel(false);
+      setNotaAvaliacao(0);
+      setComentarioAvaliacao("");
       setErroAvaliacao("");
 
       Alert.alert(
         "Avaliação enviada",
-        `Você avaliou ${nomeOutroUsuario || "este usuário"} com ${notaAvaliacao} ${
+        data?.message || `Você avaliou ${nomeOutroUsuario || "este usuário"} com ${notaAvaliacao} ${
           notaAvaliacao === 1 ? "estrela" : "estrelas"
-        }.`,
+        }.`
       );
     } catch {
-      setErroAvaliacao("Não foi possível salvar a avaliação neste dispositivo.");
+      setErroAvaliacao("Não foi possível conectar ao servidor para salvar a avaliação.");
+    } finally {
+      setEnviandoAvaliacao(false);
     }
   }, [
+    comentarioAvaliacao,
     idProposta,
-    usuarioLogado,
-    idOutroUsuario,
-    notaAvaliacao,
     nomeOutroUsuario,
+    notaAvaliacao,
   ]);
 
   // ==========================================================
@@ -2382,16 +2433,21 @@ const selecionarLocalizacao = useCallback(() => {
 
             <View style={styles.bannerInfo}>
 
-              <Text style={styles.bannerLabel}>Negociando sobre:</Text>
-
-              <Text style={styles.bannerTitle} numberOfLines={1}>
-
-                {nomeProduto || "Anúncio"}
-
+              <Text style={styles.bannerLabel}>
+                {resumoOferta ? "Resumo da proposta:" : "Negociando sobre:"}
               </Text>
-
-              <Text style={styles.bannerHint}>Toque para visualizar</Text>
-
+              <Text style={styles.bannerTitle} numberOfLines={1}>
+                {resumoOferta
+                  ? `${resumoOferta.quantidade} produtos oferecidos`
+                  : nomeProduto || "Anúncio"}
+              </Text>
+              {resumoOferta ? (
+                <Text style={styles.bannerOfferSummary}>
+                  {resumoOferta.nomes.join(", ")}
+                </Text>
+              ) : (
+                <Text style={styles.bannerHint}>Toque para visualizar</Text>
+              )}
             </View>
 
           </TouchableOpacity>
@@ -2605,156 +2661,89 @@ const selecionarLocalizacao = useCallback(() => {
       {/* MODAL DE FINALIZAÇÃO */}
 
       <Modal
-
         visible={modalFinalizacaoVisivel}
-
         transparent
-
         animationType="fade"
-
         onRequestClose={fecharModalFinalizacao}
-
       >
-
         <View style={styles.modalOverlay}>
-
           <View style={styles.modalContainer} accessibilityViewIsModal>
-
             <ScrollView
-
               contentContainerStyle={styles.modalContent}
-
               showsVerticalScrollIndicator={false}
-
               bounces={false}
-
             >
-
               <View style={styles.modalIconContainer}>
-
                 <Feather name="check-circle" size={32} color="#0099FF" />
-
               </View>
 
               <Text style={styles.modalTitle} accessibilityRole="header">
-
                 Confirmar finalização
-
               </Text>
 
               <Text style={styles.modalDescription}>
-
                 Tem certeza de que deseja finalizar esta troca?
-
               </Text>
 
               <View style={styles.modalNotice}>
-
                 <Feather name="info" size={18} color="#005386" />
-
                 <Text style={styles.modalNoticeText}>
-
                   Confirme somente se a troca já foi realizada. A troca será
-
                   concluída quando os dois usuários confirmarem.
-
                 </Text>
-
               </View>
 
               {erroFinalizacao ? (
-
                 <View style={styles.modalErrorContainer}>
-
                   <Text
-
                     style={styles.modalErrorText}
-
                     accessibilityRole="alert"
-
                     accessibilityLiveRegion="polite"
-
                   >
-
                     {erroFinalizacao}
-
                   </Text>
-
                 </View>
-
               ) : null}
 
               <View style={styles.modalActions}>
-
                 <TouchableOpacity
-
                   style={[
-
                     styles.modalCancelButton,
-
                     finalizandoTroca && styles.buttonDisabled,
-
                   ]}
-
                   activeOpacity={0.7}
-
                   onPress={fecharModalFinalizacao}
-
                   disabled={finalizandoTroca}
-
                 >
-
                   <Text style={styles.modalCancelText}>Cancelar</Text>
-
                 </TouchableOpacity>
 
                 <TouchableOpacity
-
                   style={[
-
                     styles.modalConfirmButton,
-
                     finalizandoTroca && styles.buttonDisabled,
-
                   ]}
-
                   activeOpacity={0.7}
-
                   onPress={handleFinalizeTrade}
-
                   disabled={
-
                     finalizandoTroca || tradeStatus !== "em_andamento"
-
                   }
-
                 >
-
                   {finalizandoTroca ? (
-
                     <ActivityIndicator size="small" color="#FFFFFF" />
-
                   ) : (
-
                     <Feather name="check" size={18} color="#FFFFFF" />
-
                   )}
 
                   <Text style={styles.modalConfirmText}>
-
                     {finalizandoTroca ? "Confirmando..." : "Sim, finalizar"}
-
                   </Text>
-
                 </TouchableOpacity>
-
               </View>
-
             </ScrollView>
-
           </View>
-
-        </View>      </Modal>
+        </View>
+      </Modal>
 
       {/* MODAL — AVALIAR USUÁRIO */}
       <Modal
@@ -2808,6 +2797,21 @@ const selecionarLocalizacao = useCallback(() => {
               })}
             </View>
 
+            <TextInput
+              style={styles.ratingCommentInput}
+              placeholder="Conte como foi sua experiência..."
+              placeholderTextColor="#999999"
+              value={comentarioAvaliacao}
+              onChangeText={(texto) => {
+                setComentarioAvaliacao(texto);
+                setErroAvaliacao("");
+              }}
+              multiline
+              maxLength={255}
+              editable={!enviandoAvaliacao}
+              accessibilityLabel="Comentário obrigatório da avaliação"
+            />
+
             <Text style={styles.ratingValueText}>
               {notaAvaliacao === 0
                 ? "Selecione uma nota"
@@ -2833,6 +2837,7 @@ const selecionarLocalizacao = useCallback(() => {
                 style={styles.modalCancelButton}
                 activeOpacity={0.7}
                 onPress={fecharModalAvaliacao}
+                disabled={enviandoAvaliacao}
               >
                 <Text style={styles.modalCancelText}>Cancelar</Text>
               </TouchableOpacity>
@@ -2840,13 +2845,26 @@ const selecionarLocalizacao = useCallback(() => {
               <TouchableOpacity
                 style={[
                   styles.modalConfirmButton,
-                  notaAvaliacao === 0 && styles.buttonDisabled,
+                  (notaAvaliacao === 0 ||
+                    !comentarioAvaliacao.trim() ||
+                    enviandoAvaliacao) && styles.buttonDisabled,
                 ]}
                 activeOpacity={0.7}
                 onPress={enviarAvaliacao}
+                disabled={
+                  notaAvaliacao === 0 ||
+                  !comentarioAvaliacao.trim() ||
+                  enviandoAvaliacao
+                }
               >
-                <Ionicons name="star" size={18} color="#FFFFFF" />
-                <Text style={styles.modalConfirmText}>Enviar avaliação</Text>
+                {enviandoAvaliacao ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Ionicons name="star" size={18} color="#FFFFFF" />
+                )}
+                <Text style={styles.modalConfirmText}>
+                  {enviandoAvaliacao ? "Enviando..." : "Enviar avaliação"}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -3049,6 +3067,18 @@ const styles = StyleSheet.create({
     color: "#999999",
 
     marginTop: 2,
+
+    fontFamily: "Montserrat_400Regular",
+
+  },
+
+  bannerOfferSummary: {
+
+    fontSize: 10,
+
+    lineHeight: 14,
+
+    color: "#777777",
 
     fontFamily: "Montserrat_400Regular",
 
@@ -3804,6 +3834,22 @@ const styles = StyleSheet.create({
     minHeight: 50,
     alignItems: "center",
     justifyContent: "center",
+  },
+
+  ratingCommentInput: {
+    minHeight: 76,
+    maxHeight: 120,
+    marginTop: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: "#DDE5EA",
+    borderRadius: 10,
+    backgroundColor: "#FFFFFF",
+    color: "#333333",
+    fontFamily: "Montserrat_400Regular",
+    fontSize: 14,
+    textAlignVertical: "top",
   },
 
   ratingValueText: {

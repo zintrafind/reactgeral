@@ -1,23 +1,21 @@
 import React, { useEffect, useState } from "react";
 
 import {
+    Alert,
 
-  Alert,
+    Modal,
 
-  Modal,
+    Pressable,
 
-  Pressable,
+    ScrollView,
 
-  ScrollView,
+    StyleSheet,
 
-  StyleSheet,
+    Text,
 
-  Text,
+    TouchableOpacity,
 
-  TouchableOpacity,
-
-  View,
-
+    View,
 } from "react-native";
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -25,17 +23,15 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
 
 import {
+    AntDesign,
 
-  AntDesign,
+    Feather,
 
-  Feather,
+    FontAwesome5,
 
-  FontAwesome5,
+    Ionicons,
 
-  Ionicons,
-
-  MaterialIcons,
-
+    MaterialIcons,
 } from "@expo/vector-icons";
 
 import api from "../../services/api.js";
@@ -45,7 +41,7 @@ export default function Configuracoes() {
   const [usuario, setUsuario] = useState<any>(null);
 
   // ============================================================
-  // DISPONIBILIDADE DO PERFIL — SOMENTE FRONT-END
+  // DISPONIBILIDADE DO PERFIL
   // ============================================================
   const [perfilDisponivel, setPerfilDisponivel] = useState(true);
   const [modalDisponibilidade, setModalDisponibilidade] = useState(false);
@@ -70,6 +66,30 @@ export default function Configuracoes() {
 
   }, []);
 
+  function normalizarDisponibilidadePerfil(valor: unknown): boolean {
+    if (typeof valor === "boolean") {
+      return valor;
+    }
+
+    if (typeof valor === "string") {
+      const valorNormalizado = valor.trim().toUpperCase();
+
+      if (["A", "TRUE", "1", "SIM", "S", "DISPONIVEL", "AVAILABLE"].includes(valorNormalizado)) {
+        return true;
+      }
+
+      if (["I", "FALSE", "0", "NAO", "N", "INDISPONIVEL", "UNAVAILABLE"].includes(valorNormalizado)) {
+        return false;
+      }
+    }
+
+    if (typeof valor === "number") {
+      return valor === 1;
+    }
+
+    return true;
+  }
+
   async function carregarUsuario() {
 
     try {
@@ -84,13 +104,39 @@ export default function Configuracoes() {
 
         setUsuario(usuarioSalvo);
 
-      }
+        const disponibilidadeLocal = normalizarDisponibilidadePerfil(
+          usuarioSalvo?.st_perfil_disponivel ??
+            usuarioSalvo?.perfil_disponivel ??
+            usuarioSalvo?.disponivel
+        );
 
-    
-      const statusPerfil = await AsyncStorage.getItem("@pecapeca:perfil_disponivel");
+        setPerfilDisponivel(disponibilidadeLocal);
 
-      if (statusPerfil !== null) {
-        setPerfilDisponivel(statusPerfil === "true");
+        const token = await AsyncStorage.getItem("token");
+
+        const resposta = await api.get(`/users/${usuarioSalvo.id_usuario}`, {
+          headers: {
+            Accept: "application/json",
+            ...(token
+              ? {
+                  Authorization: `Bearer ${token}`,
+                }
+              : {}),
+          },
+        });
+
+        const usuarioAtualizado = resposta.data;
+
+        const disponibilidadeServidor = normalizarDisponibilidadePerfil(
+          usuarioAtualizado?.st_perfil_disponivel ??
+            usuarioAtualizado?.perfil_disponivel ??
+            usuarioAtualizado?.disponivel
+        );
+
+        setUsuario(usuarioAtualizado);
+        setPerfilDisponivel(disponibilidadeServidor);
+
+        await AsyncStorage.setItem("usuario", JSON.stringify(usuarioAtualizado));
       }
 
     } catch (erro) {
@@ -108,21 +154,53 @@ export default function Configuracoes() {
   }
 
   // ============================================================
-  // ALTERAR DISPONIBILIDADE DO PERFIL — SOMENTE FRONT-END
+  // ALTERAR DISPONIBILIDADE DO PERFIL
   // ============================================================
 
   async function confirmarDisponibilidadePerfil() {
+    if (!usuario?.id_usuario) {
+      setModalDisponibilidade(false);
+      Alert.alert("Erro", "Não foi possível identificar o usuário.");
+      return;
+    }
+
     const novoStatus = !perfilDisponivel;
 
-    setPerfilDisponivel(novoStatus);
-    setModalDisponibilidade(false);
+    try {
+      setModalDisponibilidade(false);
+      setPerfilDisponivel(novoStatus);
 
-    // Persistência apenas local do front-end.
-    // Não altera o perfil no servidor.
-    await AsyncStorage.setItem(
-      "@pecapeca:perfil_disponivel",
-      String(novoStatus)
-    );
+      const token = await AsyncStorage.getItem("token");
+
+      const resposta = await api.put(
+        `/users/${usuario.id_usuario}/disponibilidade`,
+        {
+          st_perfil_disponivel: novoStatus ? "A" : "I",
+        },
+        {
+          headers: {
+            Accept: "application/json",
+            ...(token
+              ? {
+                  Authorization: `Bearer ${token}`,
+                }
+              : {}),
+          },
+        }
+      );
+
+      const usuarioAtualizado = resposta.data?.usuario ?? {
+        ...usuario,
+        st_perfil_disponivel: novoStatus ? "A" : "I",
+      };
+
+      setUsuario(usuarioAtualizado);
+      await AsyncStorage.setItem("usuario", JSON.stringify(usuarioAtualizado));
+    } catch (erro) {
+      setPerfilDisponivel(!novoStatus);
+      console.log("Erro ao atualizar disponibilidade do perfil:", erro);
+      Alert.alert("Erro", "Não foi possível atualizar a disponibilidade do perfil.");
+    }
   }
 
   // ============================================================

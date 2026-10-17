@@ -3,24 +3,24 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React, {
-  memo,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
+    memo,
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
 } from "react";
 import {
-  ActivityIndicator,
-  FlatList,
-  Image,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  useWindowDimensions,
-  View,
+    ActivityIndicator,
+    FlatList,
+    Image,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    useWindowDimensions,
+    View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import api from "../../services/api";
@@ -55,13 +55,12 @@ type Usuario = {
   ds_usuario?: string;
   ds_foto_perfil?: string | null;
   ds_banner?: string | null;
+  st_perfil_disponivel?: string | boolean | null;
 };
-type AvaliacaoLocal = {
-  id_proposta?: string | number;
-  id_usuario_avaliado?: string | number;
-  nota: number;
-  criado_em?: string;
-  comentario?: string | null;
+type ResumoAvaliacoes = {
+  media: string;
+  quantidade: number;
+  destaque: boolean;
 };
 
 type PerfilCache = {
@@ -371,9 +370,13 @@ export default function ProfileScreen() {
   const [limite, setLimite] = useState(LIMITE_INICIAL);
 
   // ==========================================================
-  // UC39 — MINHAS AVALIAÇÕES — SOMENTE FRONT-END
+  // UC39 — MINHAS AVALIAÇÕES
   // ==========================================================
-  const [avaliacoes, setAvaliacoes] = useState<AvaliacaoLocal[]>([]);
+  const [resumoAvaliacoes, setResumoAvaliacoes] = useState<ResumoAvaliacoes>({
+    media: "0.0",
+    quantidade: 0,
+    destaque: false,
+  });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [processando, setProcessando] = useState(false);
@@ -542,58 +545,32 @@ export default function ProfileScreen() {
       const idUsuario = Number(usuario?.id_usuario ?? usuario?.id ?? 0);
 
       if (!idUsuario) {
-        setAvaliacoes([]);
+        setResumoAvaliacoes({ media: "0.0", quantidade: 0, destaque: false });
         return;
       }
 
-      const todasAsChaves = await AsyncStorage.getAllKeys();
-      const chaves = todasAsChaves.filter((chave) =>
-        chave.startsWith("@pecapeca:avaliacao_visual:")
-      );
+      const token = await AsyncStorage.getItem("token");
+      const response = await api.get(`/usuarios/${idUsuario}/avaliacoes`, {
+        headers: {
+          Accept: "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        timeout: TIMEOUT,
+      });
 
-      if (chaves.length === 0) {
-        setAvaliacoes([]);
-        return;
-      }
-
-      const registros = await AsyncStorage.multiGet(chaves);
-
-      const encontradas: AvaliacaoLocal[] = registros
-        .map(([, valor]) => {
-          try {
-            return valor ? (JSON.parse(valor) as AvaliacaoLocal) : null;
-          } catch {
-            return null;
-          }
-        })
-        .filter(
-          (item): item is AvaliacaoLocal =>
-            !!item &&
-            Number(item.id_usuario_avaliado) === idUsuario &&
-            Number(item.nota) >= 1 &&
-            Number(item.nota) <= 5
-        );
-
-      setAvaliacoes(encontradas);
+      setResumoAvaliacoes({
+        media: Number(response.data?.media ?? 0).toFixed(1),
+        quantidade: Number(response.data?.quantidade ?? 0),
+        destaque: response.data?.destaque === true,
+      });
     } catch {
-      setAvaliacoes([]);
+      setResumoAvaliacoes({ media: "0.0", quantidade: 0, destaque: false });
     }
   }, [usuario?.id_usuario, usuario?.id]);
 
   useEffect(() => {
     void carregarAvaliacoes();
   }, [carregarAvaliacoes]);
-
-  const mediaAvaliacoes = useMemo(() => {
-    if (avaliacoes.length === 0) return "0.0";
-
-    const total = avaliacoes.reduce(
-      (soma, avaliacao) => soma + Number(avaliacao.nota),
-      0
-    );
-
-    return (total / avaliacoes.length).toFixed(1);
-  }, [avaliacoes]);
 
   const abrirMinhasAvaliacoes = useCallback(() => {
     const idUsuario = Number(usuario?.id_usuario ?? usuario?.id ?? 0);
@@ -754,6 +731,19 @@ export default function ProfileScreen() {
   }
   const banner = getImageUrl(usuario?.ds_banner);
   const fotoPerfil = getImageUrl(usuario?.ds_foto_perfil);
+  const perfilDisponivel = (() => {
+    const valor = usuario?.st_perfil_disponivel;
+    if (valor === null || valor === undefined) return true;
+    if (typeof valor === "boolean") return valor;
+    const valorNormalizado = String(valor).trim().toUpperCase();
+    if (["A", "TRUE", "1", "SIM", "S", "DISPONIVEL", "AVAILABLE"].includes(valorNormalizado)) {
+      return true;
+    }
+    if (["I", "FALSE", "0", "NAO", "N", "INDISPONIVEL", "UNAVAILABLE"].includes(valorNormalizado)) {
+      return false;
+    }
+    return true;
+  })();
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar style="dark" />
@@ -859,6 +849,31 @@ export default function ProfileScreen() {
                 {usuario?.nm_usuario || "Usuário"}
               </Text>
 
+              <View
+                style={[
+                  styles.statusPill,
+                  perfilDisponivel
+                    ? styles.statusPillDisponivel
+                    : styles.statusPillIndisponivel,
+                ]}
+              >
+                <Feather
+                  name={perfilDisponivel ? "check-circle" : "slash"}
+                  size={14}
+                  color={perfilDisponivel ? "#28A745" : "#D9534F"}
+                />
+                <Text
+                  style={[
+                    styles.statusPillText,
+                    { color: perfilDisponivel ? "#28A745" : "#D9534F" },
+                  ]}
+                >
+                  {perfilDisponivel
+                    ? "Disponível para trocas"
+                    : "Indisponível para trocas"}
+                </Text>
+              </View>
+
               <Text style={styles.description} numberOfLines={3}>
                 {usuario?.ds_usuario || "Descrição não informada"}
               </Text>
@@ -873,14 +888,22 @@ export default function ProfileScreen() {
                 <Feather name="star" size={19} color="#005386" />
 
                 <Text style={styles.ratingText}>
-                  {avaliacoes.length > 0 ? mediaAvaliacoes : "Sem avaliações"}
+                  {resumoAvaliacoes.quantidade > 0
+                    ? resumoAvaliacoes.media
+                    : "Sem avaliações"}
                 </Text>
 
-                {avaliacoes.length > 0 ? (
+                {resumoAvaliacoes.quantidade > 0 ? (
                   <Text style={styles.ratingCountText}>
-                    ({avaliacoes.length}{" "}
-                    {avaliacoes.length === 1 ? "avaliação" : "avaliações"})
+                    ({resumoAvaliacoes.quantidade}{" "}
+                    {resumoAvaliacoes.quantidade === 1 ? "avaliação" : "avaliações"})
                   </Text>
+                ) : null}
+                {resumoAvaliacoes.destaque ? (
+                  <View style={styles.wellRatedBadge}>
+                    <Feather name="award" size={12} color="#005386" />
+                    <Text style={styles.wellRatedBadgeText}>Usuário bem avaliado</Text>
+                  </View>
                 ) : null}
               </View>
 
@@ -1253,6 +1276,30 @@ const styles = StyleSheet.create({
     fontSize: 19,
     color: "#005386",
   },
+  statusPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    marginTop: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    backgroundColor: "#F4FBF7",
+  },
+  statusPillDisponivel: {
+    borderColor: "#B7E4C7",
+    backgroundColor: "#F4FBF7",
+  },
+  statusPillIndisponivel: {
+    borderColor: "#F5C2C7",
+    backgroundColor: "#FFF4F4",
+  },
+  statusPillText: {
+    fontFamily: "Montserrat_600SemiBold",
+    fontSize: 11,
+    marginLeft: 6,
+  },
   description: {
     fontFamily: "Montserrat_400Regular",
     fontSize: 13,
@@ -1305,6 +1352,23 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#777777",
     marginLeft: 6,
+  },
+
+  wellRatedBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginLeft: 8,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 10,
+    backgroundColor: "#FFF7D6",
+  },
+
+  wellRatedBadgeText: {
+    marginLeft: 4,
+    fontFamily: "Montserrat_600SemiBold",
+    fontSize: 10,
+    color: "#805B00",
   },
 
   ratingLinkRow: {

@@ -1,29 +1,40 @@
-import { 
-  View, 
-  TextInput, 
-  TouchableOpacity, 
-  StyleSheet, 
-  Modal, 
-  Image, 
-} from "react-native"; 
+import {
+    Image,
+    Modal,
+    StyleSheet,
+    TextInput,
+    TouchableOpacity,
+    View,
+} from "react-native";
  
-import { useState } from "react"; 
+import { useRef, useState } from "react";
  
-import api from "../../services/api"; 
-import { router } from "expo-router"; 
+import { router } from "expo-router";
+import api from "../../services/api";
  
-import { 
-  AntDesign, 
-  MaterialIcons, 
-} from "@expo/vector-icons"; 
+import {
+    AntDesign,
+    MaterialIcons,
+} from "@expo/vector-icons";
  
-import { Text } from "../../components/Text"; 
+import { Text } from "../../components/Text";
  
-import AsyncStorage from "@react-native-async-storage/async-storage"; 
+import AsyncStorage from "@react-native-async-storage/async-storage";
  
 export default function Login() { 
   const [email, setEmail] = useState(""); 
   const [password, setPassword] = useState(""); 
+  const [loginSuccessful, setLoginSuccessful] = useState(false);
+  const [recoveryVisible, setRecoveryVisible] = useState(false);
+  const [recoveryStep, setRecoveryStep] = useState<1 | 2 | 3>(1);
+  const [recoveryEmail, setRecoveryEmail] = useState("");
+  const [recoveryCode, setRecoveryCode] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [passwordConfirmation, setPasswordConfirmation] = useState("");
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
+  const [recoveryError, setRecoveryError] = useState("");
+  const [recoveryInfoMessage, setRecoveryInfoMessage] = useState("");
+  const recoveryRequestRef = useRef(false);
  
   // ============================================================ 
   // MODAL DE RESULTADO 
@@ -35,6 +46,124 @@ export default function Login() {
     useState<"sucesso" | "erro">("sucesso"); 
  
   const [mensagemModal, setMensagemModal] = useState(""); 
+
+  const limparRecuperacao = () => {
+    setRecoveryVisible(false);
+    setRecoveryStep(1);
+    setRecoveryEmail("");
+    setRecoveryCode("");
+    setNewPassword("");
+    setPasswordConfirmation("");
+    setRecoveryLoading(false);
+    recoveryRequestRef.current = false;
+    setRecoveryError("");
+    setRecoveryInfoMessage("");
+  };
+
+  const abrirRecuperacao = () => {
+    setRecoveryEmail(email.trim());
+    setRecoveryCode("");
+    setNewPassword("");
+    setPasswordConfirmation("");
+    setRecoveryError("");
+    setRecoveryInfoMessage("");
+    setRecoveryVisible(true);
+  };
+
+  const enviarCodigo = async () => {
+    if (recoveryRequestRef.current) return;
+    const emailRecuperacao = recoveryEmail.trim();
+    if (!emailRecuperacao) {
+      setRecoveryError("Informe seu e-mail.");
+      return;
+    }
+
+    recoveryRequestRef.current = true;
+    setRecoveryLoading(true);
+    setRecoveryError("");
+    try {
+      const response = await api.post("/forgot-password", {
+        email: emailRecuperacao,
+      });
+      setRecoveryEmail(emailRecuperacao);
+      setRecoveryStep(2);
+      setRecoveryCode("");
+      setRecoveryError("");
+      setRecoveryInfoMessage(response.data?.message || "Código de recuperação enviado para o seu e-mail.");
+    } catch (error: any) {
+      setRecoveryError(
+        error?.response?.data?.message || "Não foi possível enviar o código. Verifique sua conexão."
+      );
+    } finally {
+      recoveryRequestRef.current = false;
+      setRecoveryLoading(false);
+    }
+  };
+
+  const validarCodigo = async () => {
+    if (recoveryRequestRef.current) return;
+    if (!/^\d{6}$/.test(recoveryCode)) {
+      setRecoveryError("Informe o código de 6 dígitos recebido por e-mail.");
+      return;
+    }
+
+    recoveryRequestRef.current = true;
+    setRecoveryLoading(true);
+    setRecoveryError("");
+    try {
+      await api.post("/verify-reset-code", {
+        email: recoveryEmail.trim(),
+        code: recoveryCode,
+      });
+      setRecoveryStep(3);
+    } catch (error: any) {
+      setRecoveryError(
+        error?.response?.data?.message || "Não foi possível validar o código."
+      );
+    } finally {
+      recoveryRequestRef.current = false;
+      setRecoveryLoading(false);
+    }
+  };
+
+  const redefinirSenha = async () => {
+    if (recoveryRequestRef.current) return;
+    if (!newPassword || !passwordConfirmation) {
+      setRecoveryError("Preencha e confirme a nova senha.");
+      return;
+    }
+
+    recoveryRequestRef.current = true;
+    setRecoveryLoading(true);
+    setRecoveryError("");
+    try {
+      const response = await api.post("/reset-password", {
+        email: recoveryEmail.trim(),
+        code: recoveryCode,
+        password: newPassword,
+        password_confirmation: passwordConfirmation,
+      });
+
+      const successMessage = response.data?.message || "Senha redefinida com sucesso.";
+      setEmail(recoveryEmail.trim());
+      setPassword("");
+      setLoginSuccessful(false);
+      limparRecuperacao();
+      setTipoModal("sucesso");
+      setMensagemModal(`${successMessage} Faça login com sua nova senha.`);
+      setModalVisible(true);
+    } catch (error: any) {
+      const mensagem = error?.response?.data?.message || "Não foi possível redefinir a senha.";
+      setRecoveryError(mensagem);
+      if (mensagem.toLocaleLowerCase("pt-BR").includes("código de recuperação")) {
+        setRecoveryStep(2);
+        setRecoveryCode("");
+      }
+    } finally {
+      recoveryRequestRef.current = false;
+      setRecoveryLoading(false);
+    }
+  };
  
   // ============================================================ 
   // FAZER LOGIN 
@@ -77,6 +206,7 @@ export default function Login() {
         response.data.message || 
           "Login realizado com sucesso!" 
       ); 
+      setLoginSuccessful(true);
  
       setModalVisible(true); 
     } catch (error: any) { 
@@ -103,6 +233,7 @@ export default function Login() {
       // ======================================================== 
  
       setTipoModal("erro"); 
+      setLoginSuccessful(false);
  
       setMensagemModal(mensagemErro); 
  
@@ -121,7 +252,7 @@ export default function Login() {
     // SE O LOGIN DEU CERTO 
     // ========================================================== 
  
-    if (tipoModal === "sucesso") { 
+    if (loginSuccessful) { 
       router.replace("/(tabs)"); 
     } 
   }; 
@@ -238,6 +369,13 @@ export default function Login() {
               Entrar 
             </Text> 
           </TouchableOpacity> 
+
+          <TouchableOpacity
+            onPress={abrirRecuperacao}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.forgotPasswordLink}>Esqueci minha senha</Text>
+          </TouchableOpacity>
  
           {/* ================================================== 
               CRIAR CONTA 
@@ -299,7 +437,7 @@ export default function Login() {
  
             <Text style={styles.modalTitulo}> 
               {tipoModal === "sucesso" 
-                ? "Login realizado!" 
+                ? loginSuccessful ? "Login realizado!" : "Senha redefinida!" 
                 : "Erro ao realizar login"} 
             </Text> 
  
@@ -327,13 +465,159 @@ export default function Login() {
             > 
               <Text style={styles.modalBotaoTexto}> 
                 {tipoModal === "sucesso" 
-                  ? "Continuar" 
+                  ? loginSuccessful ? "Continuar" : "Voltar ao login" 
                   : "Tentar novamente"} 
               </Text> 
             </TouchableOpacity> 
           </View> 
         </View> 
       </Modal> 
+
+      <Modal
+        visible={recoveryVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={limparRecuperacao}
+      >
+        <View style={styles.modalFundo}>
+          <View style={styles.recoveryModalContainer}>
+            <TouchableOpacity
+              style={styles.recoveryCloseButton}
+              onPress={limparRecuperacao}
+              disabled={recoveryLoading}
+              accessibilityLabel="Fechar recuperação de senha"
+            >
+              <AntDesign name="close" size={20} color="#005386" />
+            </TouchableOpacity>
+
+            <Text style={styles.recoveryTitle}>Recuperar senha</Text>
+            <Text style={styles.recoveryDescription}>
+              {recoveryStep === 1
+                ? "Informe o e-mail cadastrado para receber um código."
+                : recoveryStep === 2
+                  ? "Digite o código enviado para seu e-mail"
+                  : "Defina uma nova senha para sua conta."}
+            </Text>
+
+            {recoveryStep === 1 ? (
+              <>
+                <Text style={styles.label}>E-mail</Text>
+                <View style={styles.inputBox}>
+                  <AntDesign name="mail" size={20} color="#005386" />
+                  <TextInput
+                    placeholder="Digite seu e-mail"
+                    placeholderTextColor="#777"
+                    style={styles.input}
+                    value={recoveryEmail}
+                    onChangeText={setRecoveryEmail}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    keyboardType="email-address"
+                    textContentType="emailAddress"
+                  />
+                </View>
+              </>
+            ) : null}
+
+            {recoveryStep === 2 ? (
+              <>
+                <Text style={styles.recoveryEmailText}>{recoveryEmail}</Text>
+                <TextInput
+                  style={styles.recoveryCodeInput}
+                  placeholder="000000"
+                  placeholderTextColor="#93A6B5"
+                  value={recoveryCode}
+                  onChangeText={(value) => {
+                    setRecoveryCode(value.replace(/\D/g, "").slice(0, 6));
+                    setRecoveryError("");
+                  }}
+                  keyboardType="number-pad"
+                  maxLength={6}
+                  textContentType="oneTimeCode"
+                  accessibilityLabel="Código de recuperação de seis dígitos"
+                />
+                <TouchableOpacity
+                  onPress={() => void enviarCodigo()}
+                  disabled={recoveryLoading}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.recoveryLink}>Reenviar código</Text>
+                </TouchableOpacity>
+              </>
+            ) : null}
+
+            {recoveryStep === 3 ? (
+              <>
+                <Text style={styles.label}>Nova senha</Text>
+                <View style={styles.inputBox}>
+                  <AntDesign name="lock" size={20} color="#005386" />
+                  <TextInput
+                    placeholder="Mínimo de 8 caracteres"
+                    placeholderTextColor="#777"
+                    secureTextEntry
+                    style={styles.input}
+                    value={newPassword}
+                    onChangeText={setNewPassword}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    textContentType="newPassword"
+                  />
+                </View>
+                <Text style={styles.label}>Confirmar nova senha</Text>
+                <View style={styles.inputBox}>
+                  <AntDesign name="lock" size={20} color="#005386" />
+                  <TextInput
+                    placeholder="Digite novamente a nova senha"
+                    placeholderTextColor="#777"
+                    secureTextEntry
+                    style={styles.input}
+                    value={passwordConfirmation}
+                    onChangeText={setPasswordConfirmation}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    textContentType="newPassword"
+                  />
+                </View>
+              </>
+            ) : null}
+
+            {recoveryInfoMessage ? (
+              <Text style={styles.recoveryInfoMessage}>{recoveryInfoMessage}</Text>
+            ) : null}
+
+            {recoveryError ? (
+              <Text style={styles.recoveryError} accessibilityRole="alert">
+                {recoveryError}
+              </Text>
+            ) : null}
+
+            <TouchableOpacity
+              style={[
+                styles.button,
+                styles.recoverySubmitButton,
+                recoveryLoading && styles.recoveryButtonDisabled,
+              ]}
+              onPress={() => {
+                if (recoveryStep === 1) void enviarCodigo();
+                else if (recoveryStep === 2) void validarCodigo();
+                else void redefinirSenha();
+              }}
+              disabled={recoveryLoading}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.buttonText}>
+                {recoveryLoading
+                  ? "Aguarde..."
+                  : recoveryStep === 1
+                    ? "Enviar código"
+                    : recoveryStep === 2
+                      ? "Validar código"
+                      : "Redefinir senha"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </> 
   ); 
 } 
@@ -470,6 +754,15 @@ const styles = StyleSheet.create({
     fontFamily: "Montserrat_500Medium", 
     includeFontPadding: false, 
   }, 
+
+  forgotPasswordLink: {
+    textAlign: "center",
+    marginTop: 14,
+    color: "#005386",
+    fontSize: 13,
+    fontFamily: "Montserrat_500Medium",
+    includeFontPadding: false,
+  },
  
   // ========================================================== 
   // FUNDO DO MODAL 
@@ -599,4 +892,107 @@ const styles = StyleSheet.create({
     fontFamily: "Montserrat_700Bold", 
     includeFontPadding: false, 
   }, 
+
+  recoveryModalContainer: {
+    width: "100%",
+    maxWidth: 380,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 25,
+    paddingHorizontal: 25,
+    paddingTop: 30,
+    paddingBottom: 25,
+    elevation: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+  },
+
+  recoveryCloseButton: {
+    position: "absolute",
+    right: 16,
+    top: 14,
+    zIndex: 1,
+    width: 36,
+    height: 36,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  recoveryTitle: {
+    marginTop: 8,
+    marginBottom: 8,
+    color: "#005386",
+    fontSize: 21,
+    textAlign: "center",
+    fontFamily: "Montserrat_700Bold",
+  },
+
+  recoveryDescription: {
+    marginBottom: 18,
+    color: "#666666",
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: "center",
+    fontFamily: "Montserrat_400Regular",
+  },
+
+  recoveryEmailText: {
+    marginBottom: 12,
+    color: "#2f5d73",
+    textAlign: "center",
+    fontSize: 13,
+    fontFamily: "Montserrat_500Medium",
+  },
+
+  recoveryCodeInput: {
+    height: 54,
+    marginBottom: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#C8E6F1",
+    backgroundColor: "#E4F8FF",
+    color: "#005386",
+    fontSize: 24,
+    letterSpacing: 6,
+    textAlign: "center",
+    fontFamily: "Montserrat_600SemiBold",
+  },
+
+  recoveryLink: {
+    marginTop: 5,
+    marginBottom: 7,
+    color: "#0099FF",
+    textAlign: "center",
+    fontSize: 13,
+    fontFamily: "Montserrat_600SemiBold",
+  },
+
+  recoveryInfoMessage: {
+    marginTop: 4,
+    marginBottom: 8,
+    color: "#237A45",
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: "center",
+    fontFamily: "Montserrat_400Regular",
+  },
+
+  recoveryError: {
+    marginTop: 4,
+    marginBottom: 8,
+    color: "#B42318",
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: "center",
+    fontFamily: "Montserrat_400Regular",
+  },
+
+  recoverySubmitButton: {
+    marginTop: 12,
+  },
+
+  recoveryButtonDisabled: {
+    opacity: 0.6,
+  },
 }); 

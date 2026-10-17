@@ -612,8 +612,10 @@ export default function ProductDetailScreen() {
   const [solicitandoTroca, setSolicitandoTroca] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [meusProdutos, setMeusProdutos] = useState<any[]>([]);
+  const [modalSemProdutoVisible, setModalSemProdutoVisible] = useState(false);
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [enviandoProposta, setEnviandoProposta] = useState(false);
+  const [erroProposta, setErroProposta] = useState("");
   const propostaEmEnvioRef = useRef(false);
 
   // FAVORITOS
@@ -740,14 +742,12 @@ export default function ProductDetailScreen() {
           item.st_status === "A" && Number(item.id_produto) !== Number(product.id_produto),
       );
       if (produtosDisponiveis.length === 0) {
-        Alert.alert(
-          "Sem produtos disponíveis",
-          "Você não possui outros produtos disponíveis para oferecer em uma troca.",
-        );
+        setModalSemProdutoVisible(true);
         return;
       }
       setMeusProdutos(produtosDisponiveis);
       setSelectedProductIds([]);
+      setErroProposta("");
       setModalVisible(true);
     } catch (error) {
       console.error("Erro ao solicitar troca:", error);
@@ -762,20 +762,11 @@ export default function ProductDetailScreen() {
       return;
     }
 
-    // O backend atual ainda registra uma única peça por proposta.
-    // Com apenas 1 item selecionado, mantém exatamente o fluxo antigo.
-    if (selectedProductIds.length > 1) {
-      Alert.alert(
-        "Proposta com múltiplos itens",
-        "A seleção de vários itens já funciona no front-end, mas o envio de múltiplos itens ainda depende do backend. Para realizar uma troca de exemplo agora, selecione apenas um item."
-      );
-      return;
-    }
-
     if (propostaEmEnvioRef.current) return;
 
     propostaEmEnvioRef.current = true;
     setEnviandoProposta(true);
+    setErroProposta("");
 
     try {
       const token = await AsyncStorage.getItem("token");
@@ -785,13 +776,11 @@ export default function ProductDetailScreen() {
         return;
       }
 
-      const selectedProductId = selectedProductIds[0];
-
       await api.post(
         "/propostas",
         {
           id_produto_desejado: Number(product.id_produto),
-          id_produto_oferecido: Number(selectedProductId),
+          ids_produtos_oferecidos: selectedProductIds.map(Number),
         },
         {
           headers: {
@@ -808,9 +797,7 @@ export default function ProductDetailScreen() {
       router.push("/trocas" as any);
     } catch (error: any) {
       console.error("Erro ao confirmar troca:", error);
-
-      Alert.alert(
-        "Erro",
+      setErroProposta(
         error?.response?.data?.message ||
           error?.message ||
           "Não foi possível enviar a proposta de troca.",
@@ -1100,6 +1087,11 @@ export default function ProductDetailScreen() {
               }}
             />
             <View style={styles.modalFooterContainer}>
+              {erroProposta ? (
+                <Text style={styles.proposalError} accessibilityRole="alert">
+                  {erroProposta}
+                </Text>
+              ) : null}
               <TouchableOpacity
                 style={[
                   styles.confirmButton,
@@ -1117,6 +1109,31 @@ export default function ProductDetailScreen() {
                 )}
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={modalSemProdutoVisible}
+        onRequestClose={() => setModalSemProdutoVisible(false)}
+      >
+        <View style={styles.noProductModalOverlay}>
+          <View style={styles.noProductModalCard}>
+            <View style={styles.noProductModalIcon}>
+              <Feather name="alert-triangle" size={28} color="#D99000" />
+            </View>
+            <Text style={styles.noProductModalTitle}>Produto necessário</Text>
+            <Text style={styles.noProductModalMessage}>
+              Você precisa ter um produto publicado e disponível para realizar uma solicitação de troca.
+            </Text>
+            <TouchableOpacity
+              style={styles.noProductModalButton}
+              activeOpacity={0.8}
+              onPress={() => setModalSemProdutoVisible(false)}
+            >
+              <Text style={styles.noProductModalButtonText}>Entendi</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -1311,6 +1328,58 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 22,
     overflow: "hidden",
   },
+  noProductModalOverlay: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+    backgroundColor: "rgba(0,0,0,0.55)",
+  },
+  noProductModalCard: {
+    width: "100%",
+    maxWidth: 400,
+    alignItems: "center",
+    padding: 24,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+  },
+  noProductModalIcon: {
+    width: 56,
+    height: 56,
+    justifyContent: "center",
+    alignItems: "center",
+    borderRadius: 28,
+    backgroundColor: "#FFF4D6",
+  },
+  noProductModalTitle: {
+    marginTop: 16,
+    fontFamily: "Montserrat_700Bold",
+    fontSize: 20,
+    color: "#005386",
+    textAlign: "center",
+  },
+  noProductModalMessage: {
+    marginTop: 10,
+    fontFamily: "Montserrat_400Regular",
+    fontSize: 14,
+    lineHeight: 22,
+    color: "#475569",
+    textAlign: "center",
+  },
+  noProductModalButton: {
+    width: "100%",
+    height: 48,
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 22,
+    backgroundColor: "#0099FF",
+    borderRadius: 10,
+  },
+  noProductModalButtonText: {
+    fontFamily: "Montserrat_700Bold",
+    fontSize: 14,
+    color: "#FFFFFF",
+  },
   modalHeader: {
     height: 58,
     flexDirection: "row",
@@ -1428,6 +1497,14 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: "#EEEEEE",
     backgroundColor: "#FFFFFF",
+  },
+  proposalError: {
+    marginBottom: 10,
+    color: "#B42318",
+    fontFamily: "Montserrat_500Medium",
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: "center",
   },
   confirmButton: {
     backgroundColor: "#0099FF",

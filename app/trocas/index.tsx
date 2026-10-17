@@ -4,10 +4,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { useFocusEffect, useRouter } from "expo-router";
 
-import { Ionicons } from "@expo/vector-icons";
 
 import React, {
-
   memo,
 
   useCallback,
@@ -19,11 +17,9 @@ import React, {
   useRef,
 
   useState,
-
 } from "react";
 
 import {
-
   ActivityIndicator,
 
   Alert,
@@ -47,7 +43,6 @@ import {
   TouchableOpacity,
 
   View
-
 } from "react-native";
 
 import api from "../../services/api";
@@ -94,11 +89,11 @@ type Troca = {
 
   fotoOutroUsuario: string | null;
 
-  status: "PENDENTE" | "ACEITA" | "RECUSADA" | "FINALIZADA";
+  status: "PENDENTE" | "ACEITA" | "RECUSADA" | "FINALIZADA" | "CANCELADA";
 
-  meuProduto: ProdutoTroca | null;
+  produtosVoceRecebe: ProdutoTroca[];
 
-  outroProduto: ProdutoTroca | null;
+  produtosVoceOferece: ProdutoTroca[];
 
   idSolicitante: number;
 
@@ -178,11 +173,14 @@ function getProdutoImage(produto: ProdutoTroca | null): string | null {
 
 function formatarTroca(proposta: any, usuarioLogadoId: number): Troca {
 
-  const itemOferecido = proposta.itens?.find((i: any) => i.tp_item === "O");
+  const itens = Array.isArray(proposta.itens) ? proposta.itens : [];
 
-  const itemDesejado = proposta.itens?.find((i: any) => i.tp_item === "D");
+  const produtosOferecidos = itens
+    .filter((item: any) => item.tp_item === "O")
+    .map((item: any) => item.produto || null)
+    .filter((produto: ProdutoTroca | null): produto is ProdutoTroca => produto !== null);
 
-  const produtoOferecido = itemOferecido?.produto || null;
+  const itemDesejado = itens.find((item: any) => item.tp_item === "D");
 
   const produtoDesejado = itemDesejado?.produto || null;
 
@@ -191,6 +189,18 @@ function formatarTroca(proposta: any, usuarioLogadoId: number): Troca {
   const idDestinatario = Number(proposta.id_destinatario);
 
   const souDestinatario = idDestinatario === usuarioLogadoId;
+
+  const produtosVoceRecebe = souDestinatario
+    ? produtosOferecidos
+    : produtoDesejado
+      ? [produtoDesejado]
+      : [];
+
+  const produtosVoceOferece = souDestinatario
+    ? produtoDesejado
+      ? [produtoDesejado]
+      : []
+    : produtosOferecidos;
 
   const outroUsuario = souDestinatario
 
@@ -212,6 +222,10 @@ function formatarTroca(proposta: any, usuarioLogadoId: number): Troca {
 
       ? "FINALIZADA"
 
+      : proposta.st_troca === "C"
+
+      ? "CANCELADA"
+
       : "RECUSADA";
 
   return {
@@ -232,9 +246,9 @@ function formatarTroca(proposta: any, usuarioLogadoId: number): Troca {
 
     status,
 
-    meuProduto: souDestinatario ? produtoDesejado : produtoOferecido,
+    produtosVoceRecebe,
 
-    outroProduto: souDestinatario ? produtoOferecido : produtoDesejado,
+    produtosVoceOferece,
 
     idSolicitante,
 
@@ -280,7 +294,15 @@ async function loadTrocasCache(): Promise<Troca[] | null> {
 
     if (Date.now() - parsed.ts > TROCAS_CACHE_MAX_AGE) return null;
 
-    return parsed.data as Troca[];
+    return parsed.data.map((troca: any) => ({
+      ...troca,
+      produtosVoceRecebe: Array.isArray(troca.produtosVoceRecebe)
+        ? troca.produtosVoceRecebe
+        : [troca.outroProduto].filter(Boolean),
+      produtosVoceOferece: Array.isArray(troca.produtosVoceOferece)
+        ? troca.produtosVoceOferece
+        : [troca.meuProduto].filter(Boolean),
+    })) as Troca[];
 
   } catch {
 
@@ -414,6 +436,20 @@ const StatusTroca = memo(function StatusTroca({
 
         };
 
+      case "CANCELADA":
+
+        return {
+
+          style: styles.rejectedBadge,
+
+          icon: "x-circle" as const,
+
+          color: "#721C24",
+
+          label: "Cancelada",
+
+        };
+
       default:
 
         return {
@@ -462,6 +498,8 @@ const ProdutoTrocaCard = memo(function ProdutoTrocaCard({
 
   titulo,
 
+  mostrarTitulo = true,
+
   onPress,
 
 }: {
@@ -469,6 +507,8 @@ const ProdutoTrocaCard = memo(function ProdutoTrocaCard({
   produto: ProdutoTroca | null;
 
   titulo: string;
+
+  mostrarTitulo?: boolean;
 
   onPress: (produto: ProdutoTroca | null) => void;
 
@@ -488,7 +528,7 @@ const ProdutoTrocaCard = memo(function ProdutoTrocaCard({
 
       <View style={styles.tradeProductSection}>
 
-        <Text style={styles.tradeProductTitle}>{titulo}</Text>
+        {mostrarTitulo && <Text style={styles.tradeProductTitle}>{titulo}</Text>}
 
         <View style={styles.productUnavailable}>
 
@@ -514,7 +554,7 @@ const ProdutoTrocaCard = memo(function ProdutoTrocaCard({
 
     <View style={styles.tradeProductSection}>
 
-      <Text style={styles.tradeProductTitle}>{titulo}</Text>
+      {mostrarTitulo && <Text style={styles.tradeProductTitle}>{titulo}</Text>}
 
       <View style={styles.tradeProductCard}>
 
@@ -1194,22 +1234,64 @@ export default function TrocasScreen() {
 
     if (!id || !tipo || acaoEmAndamento !== null) return;
 
-    // UC27 — SOMENTE VISUAL:
-    // ao confirmar o cancelamento, o modal apenas fecha.
-    // Nenhum status é alterado e nenhuma requisição é enviada.
     if (tipo === "C") {
+      setErroAcao("");
+      setAcaoEmAndamento(id);
 
-      setConfirmacaoTroca((atual) => ({ ...atual, visivel: false }));
+      try {
+        const token = await AsyncStorage.getItem("token");
+
+        if (!token) {
+          const mensagem = "Sua sessão expirou. Faça login novamente.";
+          setErroAcao(mensagem);
+          if (Platform.OS === "web") window.alert(mensagem);
+          else Alert.alert("Login necessário", mensagem);
+          return;
+        }
+
+        const response = await api.put(
+          `/propostas/${id}/cancelar`,
+          {},
+          {
+            headers: {
+              Accept: "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            timeout: TEMPO_LIMITE_REQUISICAO,
+          }
+        );
+
+        if (response.status !== 200) {
+          throw new Error("Não foi possível cancelar a solicitação.");
+        }
+
+        await recarregar();
+        setConfirmacaoTroca((atual) => ({ ...atual, visivel: false }));
+
+        const mensagem =
+          response?.data?.message || "Solicitação cancelada com sucesso!";
+        if (Platform.OS === "web") window.alert(mensagem);
+        else Alert.alert("Solicitação cancelada", mensagem);
+      } catch (error: any) {
+        const mensagem =
+          error?.response?.data?.message ||
+          error?.message ||
+          "Não foi possível cancelar a solicitação.";
+        setErroAcao(mensagem);
+        if (Platform.OS === "web") window.alert(mensagem);
+        else Alert.alert("Erro", mensagem);
+      } finally {
+        setAcaoEmAndamento(null);
+      }
 
       return;
-
     }
 
     await handleAlterarStatus(id, tipo);
 
     setConfirmacaoTroca((atual) => ({ ...atual, visivel: false }));
 
-  }, [acaoEmAndamento, confirmacaoTroca, handleAlterarStatus]);
+  }, [acaoEmAndamento, confirmacaoTroca, handleAlterarStatus, recarregar]);
 
   const handleAceitarTroca = useCallback((id: number) => {
 
@@ -1385,15 +1467,23 @@ export default function TrocasScreen() {
 
           <View style={styles.exchangeContainer}>
 
-            <ProdutoTrocaCard
-
-              produto={item.outroProduto}
-
-              titulo="VOCÊ RECEBE"
-
-              onPress={abrirProduto}
-
-            />
+            {item.produtosVoceRecebe.length > 0 ? (
+              item.produtosVoceRecebe.map((produto, index) => (
+                <ProdutoTrocaCard
+                  key={`recebe-${item.id}-${produto.id_produto}`}
+                  produto={produto}
+                  titulo="VOCÊ RECEBE"
+                  mostrarTitulo={index === 0}
+                  onPress={abrirProduto}
+                />
+              ))
+            ) : (
+              <ProdutoTrocaCard
+                produto={null}
+                titulo="VOCÊ RECEBE"
+                onPress={abrirProduto}
+              />
+            )}
 
             <View style={styles.exchangeDivider}>
 
@@ -1409,15 +1499,23 @@ export default function TrocasScreen() {
 
             </View>
 
-            <ProdutoTrocaCard
-
-              produto={item.meuProduto}
-
-              titulo="VOCÊ OFERECE"
-
-              onPress={abrirProduto}
-
-            />
+            {item.produtosVoceOferece.length > 0 ? (
+              item.produtosVoceOferece.map((produto, index) => (
+                <ProdutoTrocaCard
+                  key={`oferece-${item.id}-${produto.id_produto}`}
+                  produto={produto}
+                  titulo="VOCÊ OFERECE"
+                  mostrarTitulo={index === 0}
+                  onPress={abrirProduto}
+                />
+              ))
+            ) : (
+              <ProdutoTrocaCard
+                produto={null}
+                titulo="VOCÊ OFERECE"
+                onPress={abrirProduto}
+              />
+            )}
 
           </View>
 

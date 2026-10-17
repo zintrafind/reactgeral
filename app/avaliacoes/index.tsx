@@ -1,47 +1,43 @@
 import { Feather } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    FlatList,
+    Image,
+    SafeAreaView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
+import api from "../../services/api";
 
-type AvaliacaoLocal = {
-  storageKey: string;
-  id_proposta?: string | number;
-  id_usuario_avaliado?: string | number;
-  nota: number;
-  criado_em?: string;
-  comentario?: string | null;
+type AvaliacaoAPI = {
+  id_avaliacao: number;
+  id_proposta: number;
+  nr_nota: number;
+  ds_comentario: string;
+  created_at: string;
+  avaliador?: {
+    id_usuario: number;
+    nm_usuario: string;
+    ds_foto_perfil?: string | null;
+  } | null;
 };
 
-type ComentarioAvaliacao = {
-  id: string;
-  texto: string;
-  autor: string;
-  criado_em: string;
+type ComentarioAPI = {
+  id_comentario: number;
+  ds_comentario: string;
+  created_at: string;
+  autor?: {
+    id_usuario: number;
+    nm_usuario: string;
+    ds_foto_perfil?: string | null;
+  } | null;
 };
-
-const AVALIACAO_PREFIX = "@pecapeca:avaliacao_visual:";
-const COMENTARIO_PREFIX = "@pecapeca:comentarios_avaliacao:";
-
-// Validação visual/local simples para o UC40.
-// Depois o backend deve fazer a moderação real.
-const TERMOS_BLOQUEADOS = [
-  "idiota",
-  "burro",
-  "imbecil",
-  "otario",
-  "otário",
-];
 
 export default function AvaliacoesScreen() {
   const router = useRouter();
@@ -50,49 +46,19 @@ export default function AvaliacoesScreen() {
   const idParametro = Array.isArray(params.id) ? params.id[0] : params.id;
   const nomeParametro = Array.isArray(params.nome) ? params.nome[0] : params.nome;
 
-  const [avaliacoes, setAvaliacoes] = useState<AvaliacaoLocal[]>([]);
+  const [avaliacoes, setAvaliacoes] = useState<AvaliacaoAPI[]>([]);
+  const [mediaAvaliacoes, setMediaAvaliacoes] = useState("0.0");
+  const [quantidadeAvaliacoes, setQuantidadeAvaliacoes] = useState(0);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState("");
+  const [avaliacoesAbertas, setAvaliacoesAbertas] = useState<Record<number, boolean>>({});
+  const [comentarios, setComentarios] = useState<Record<number, ComentarioAPI[]>>({});
+  const [carregandoComentarios, setCarregandoComentarios] = useState<Record<number, boolean>>({});
+  const [comentariosRascunho, setComentariosRascunho] = useState<Record<number, string>>({});
+  const [enviandoComentario, setEnviandoComentario] = useState<Record<number, boolean>>({});
+  const [errosComentario, setErrosComentario] = useState<Record<number, string>>({});
 
-  const [avaliacaoAberta, setAvaliacaoAberta] = useState<string | null>(null);
-  const [textoComentario, setTextoComentario] = useState("");
-  const [erroComentario, setErroComentario] = useState("");
-  const [enviandoComentario, setEnviandoComentario] = useState(false);
-  const [comentariosPorAvaliacao, setComentariosPorAvaliacao] = useState<
-    Record<string, ComentarioAvaliacao[]>
-  >({});
-
-  const [nomeUsuarioLogado, setNomeUsuarioLogado] = useState("Você");
-
-  useEffect(() => {
-    carregarUsuarioLogado();
-    carregarAvaliacoes();
-  }, [idParametro]);
-
-  const carregarUsuarioLogado = async () => {
-    try {
-      const raw = await AsyncStorage.getItem("usuario");
-      if (!raw) return;
-
-      const parsed = JSON.parse(raw);
-      const usuario =
-        parsed?.user ||
-        parsed?.usuario ||
-        parsed?.data ||
-        parsed;
-
-      const nome =
-        usuario?.nm_usuario ||
-        usuario?.nome ||
-        usuario?.name;
-
-      if (nome) {
-        setNomeUsuarioLogado(String(nome));
-      }
-    } catch {}
-  };
-
-  const carregarAvaliacoes = async () => {
+  const carregarAvaliacoes = useCallback(async () => {
     try {
       setLoading(true);
       setErro("");
@@ -101,93 +67,43 @@ export default function AvaliacoesScreen() {
 
       if (!idUsuario) {
         setAvaliacoes([]);
+        setMediaAvaliacoes("0.0");
+        setQuantidadeAvaliacoes(0);
         setErro("Não foi possível identificar este usuário.");
         return;
       }
 
-      const todasAsChaves = await AsyncStorage.getAllKeys();
+      const token = await AsyncStorage.getItem("token");
+      const response = await api.get(`/usuarios/${idUsuario}/avaliacoes`, {
+        headers: {
+          Accept: "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
 
-      const chavesAvaliacao = todasAsChaves.filter((chave) =>
-        chave.startsWith(AVALIACAO_PREFIX)
-      );
-
-      if (chavesAvaliacao.length === 0) {
-        setAvaliacoes([]);
-        return;
-      }
-
-      const registros = await AsyncStorage.multiGet(chavesAvaliacao);
-
-      const encontradas: AvaliacaoLocal[] = registros
-        .map(([storageKey, valor]) => {
-          try {
-            if (!valor) return null;
-
-            const item = JSON.parse(valor);
-
-            return {
-              ...item,
-              storageKey,
-            } as AvaliacaoLocal;
-          } catch {
-            return null;
-          }
-        })
-        .filter(
-          (item): item is AvaliacaoLocal =>
-            !!item &&
-            Number(item.id_usuario_avaliado) === idUsuario &&
-            Number(item.nota) >= 1 &&
-            Number(item.nota) <= 5
-        )
-        .sort((a, b) => {
-          const dataA = a.criado_em ? new Date(a.criado_em).getTime() : 0;
-          const dataB = b.criado_em ? new Date(b.criado_em).getTime() : 0;
-          return dataB - dataA;
-        });
+      const encontradas = Array.isArray(response.data?.avaliacoes)
+        ? response.data.avaliacoes as AvaliacaoAPI[]
+        : [];
+      const media = Number(response.data?.media ?? 0);
+      const quantidade = Number(response.data?.quantidade ?? encontradas.length);
 
       setAvaliacoes(encontradas);
-
-      const comentarios: Record<string, ComentarioAvaliacao[]> = {};
-
-      await Promise.all(
-        encontradas.map(async (avaliacao) => {
-          try {
-            const chaveComentarios = criarChaveComentarios(avaliacao.storageKey);
-            const rawComentarios = await AsyncStorage.getItem(chaveComentarios);
-
-            comentarios[avaliacao.storageKey] = rawComentarios
-              ? JSON.parse(rawComentarios)
-              : [];
-          } catch {
-            comentarios[avaliacao.storageKey] = [];
-          }
-        })
-      );
-
-      setComentariosPorAvaliacao(comentarios);
+      setMediaAvaliacoes(media.toFixed(1));
+      setQuantidadeAvaliacoes(quantidade);
     } catch (error) {
       console.error("ERRO AO CARREGAR AVALIAÇÕES:", error);
       setAvaliacoes([]);
+      setMediaAvaliacoes("0.0");
+      setQuantidadeAvaliacoes(0);
       setErro("Não foi possível carregar as avaliações.");
     } finally {
       setLoading(false);
     }
-  };
+  }, [idParametro]);
 
-  const criarChaveComentarios = (storageKey: string) =>
-    `${COMENTARIO_PREFIX}${encodeURIComponent(storageKey)}`;
-
-  const mediaAvaliacoes = useMemo(() => {
-    if (avaliacoes.length === 0) return "0.0";
-
-    const total = avaliacoes.reduce(
-      (soma, item) => soma + Number(item.nota),
-      0
-    );
-
-    return (total / avaliacoes.length).toFixed(1);
-  }, [avaliacoes]);
+  useEffect(() => {
+    void carregarAvaliacoes();
+  }, [carregarAvaliacoes]);
 
   const formatarData = (data?: string) => {
     if (!data) return "";
@@ -199,73 +115,108 @@ export default function AvaliacoesScreen() {
     return date.toLocaleDateString("pt-BR");
   };
 
-  const abrirComentario = (storageKey: string) => {
-    if (avaliacaoAberta === storageKey) {
-      setAvaliacaoAberta(null);
-      setTextoComentario("");
-      setErroComentario("");
-      return;
-    }
+  const urlFotoAutor = (caminho?: string | null) => {
+    const path = String(caminho || "").trim();
+    if (!path) return null;
+    if (/^(https?:|blob:|data:|file:|content:)/i.test(path)) return path;
 
-    setAvaliacaoAberta(storageKey);
-    setTextoComentario("");
-    setErroComentario("");
+    const baseUrl = String(api.defaults.baseURL || "http://127.0.0.1:8000/api")
+      .replace(/\/+$/, "")
+      .replace(/\/api$/, "");
+    const normalizedPath = path
+      .replace(/\\/g, "/")
+      .replace(/^\/+/, "")
+      .replace(/^storage\/+/, "");
+
+    return `${baseUrl}/storage/${normalizedPath}`;
   };
 
-  const contemConteudoInadequado = (texto: string) => {
-    const normalizado = texto.toLocaleLowerCase("pt-BR");
-
-    return TERMOS_BLOQUEADOS.some((termo) =>
-      normalizado.includes(termo.toLocaleLowerCase("pt-BR"))
-    );
-  };
-
-  const enviarComentario = async (avaliacao: AvaliacaoLocal) => {
-    const comentario = textoComentario.trim();
-
-    if (!comentario) {
-      setErroComentario("Digite um comentário antes de enviar.");
-      return;
-    }
-
-    if (contemConteudoInadequado(comentario)) {
-      setErroComentario(
-        "O comentário contém conteúdo inadequado e não pode ser publicado."
-      );
-      return;
-    }
+  const carregarComentarios = useCallback(async (idAvaliacao: number) => {
+    setCarregandoComentarios((current) => ({ ...current, [idAvaliacao]: true }));
+    setErrosComentario((current) => ({ ...current, [idAvaliacao]: "" }));
 
     try {
-      setEnviandoComentario(true);
-      setErroComentario("");
+      const token = await AsyncStorage.getItem("token");
+      const response = await api.get(`/avaliacoes/${idAvaliacao}/comentarios`, {
+        headers: {
+          Accept: "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      const lista = Array.isArray(response.data?.comentarios)
+        ? response.data.comentarios as ComentarioAPI[]
+        : [];
 
-      const novoComentario: ComentarioAvaliacao = {
-        id: `${Date.now()}`,
-        texto: comentario,
-        autor: nomeUsuarioLogado || "Você",
-        criado_em: new Date().toISOString(),
-      };
-
-      const atuais = comentariosPorAvaliacao[avaliacao.storageKey] || [];
-      const atualizados = [...atuais, novoComentario];
-
-      const chave = criarChaveComentarios(avaliacao.storageKey);
-
-      await AsyncStorage.setItem(chave, JSON.stringify(atualizados));
-
-      setComentariosPorAvaliacao((prev) => ({
-        ...prev,
-        [avaliacao.storageKey]: atualizados,
+      setComentarios((current) => ({ ...current, [idAvaliacao]: lista }));
+    } catch (error: any) {
+      setErrosComentario((current) => ({
+        ...current,
+        [idAvaliacao]: error?.response?.data?.message || "Não foi possível carregar os comentários.",
       }));
-
-      setTextoComentario("");
-      setAvaliacaoAberta(null);
-
-      Alert.alert("Comentário publicado", "Seu comentário foi adicionado à avaliação.");
-    } catch {
-      setErroComentario("Não foi possível publicar o comentário.");
     } finally {
-      setEnviandoComentario(false);
+      setCarregandoComentarios((current) => ({ ...current, [idAvaliacao]: false }));
+    }
+  }, []);
+
+  const alternarComentarios = (idAvaliacao: number) => {
+    const estaAberta = Boolean(avaliacoesAbertas[idAvaliacao]);
+    setAvaliacoesAbertas((current) => ({ ...current, [idAvaliacao]: !estaAberta }));
+    if (!estaAberta) void carregarComentarios(idAvaliacao);
+  };
+
+  const enviarComentario = async (idAvaliacao: number) => {
+    const texto = (comentariosRascunho[idAvaliacao] || "").trim();
+    if (!texto) {
+      setErrosComentario((current) => ({
+        ...current,
+        [idAvaliacao]: "Digite um comentário antes de enviar.",
+      }));
+      return;
+    }
+
+    setEnviandoComentario((current) => ({ ...current, [idAvaliacao]: true }));
+    setErrosComentario((current) => ({ ...current, [idAvaliacao]: "" }));
+
+    try {
+      const token = await AsyncStorage.getItem("token");
+      if (!token) {
+        setErrosComentario((current) => ({
+          ...current,
+          [idAvaliacao]: "Faça login para comentar esta avaliação.",
+        }));
+        return;
+      }
+
+      const response = await api.post(
+        `/avaliacoes/${idAvaliacao}/comentarios`,
+        { ds_comentario: texto },
+        {
+          headers: {
+            Accept: "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      const novoComentario = response.data?.comentario as ComentarioAPI;
+      if (novoComentario) {
+        setComentarios((current) => ({
+          ...current,
+          [idAvaliacao]: [...(current[idAvaliacao] || []), novoComentario],
+        }));
+      } else {
+        await carregarComentarios(idAvaliacao);
+      }
+      setComentariosRascunho((current) => ({ ...current, [idAvaliacao]: "" }));
+    } catch (error: any) {
+      const validationErrors = error?.response?.data?.errors;
+      const commentError = validationErrors?.ds_comentario?.[0];
+      setErrosComentario((current) => ({
+        ...current,
+        [idAvaliacao]: commentError || error?.response?.data?.message || "Não foi possível publicar o comentário.",
+      }));
+    } finally {
+      setEnviandoComentario((current) => ({ ...current, [idAvaliacao]: false }));
     }
   };
 
@@ -333,7 +284,7 @@ export default function AvaliacoesScreen() {
       ) : (
         <FlatList
           data={avaliacoes}
-          keyExtractor={(item) => item.storageKey}
+          keyExtractor={(item) => String(item.id_avaliacao)}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.listContent}
           ListHeaderComponent={
@@ -347,176 +298,187 @@ export default function AvaliacoesScreen() {
               </View>
 
               <Text style={styles.totalText}>
-                {avaliacoes.length}{" "}
-                {avaliacoes.length === 1 ? "avaliação" : "avaliações"}
+                {quantidadeAvaliacoes}{" "}
+                {quantidadeAvaliacoes === 1 ? "avaliação" : "avaliações"}
               </Text>
             </View>
           }
           renderItem={({ item }) => {
-            const comentarios =
-              comentariosPorAvaliacao[item.storageKey] || [];
-
-            const comentarioAberto =
-              avaliacaoAberta === item.storageKey;
+            const fotoAvaliador = item.avaliador?.ds_foto_perfil;
+            const uriFoto = fotoAvaliador
+              ? /^(https?:|blob:|data:|file:|content:)/i.test(fotoAvaliador)
+                ? fotoAvaliador
+                : `${String(api.defaults.baseURL || "http://127.0.0.1:8000/api").replace(/\/api\/?$/, "")}/storage/${fotoAvaliador.replace(/^\/+|^storage\/+/, "")}`
+              : null;
 
             return (
               <View style={styles.reviewCard}>
                 <View style={styles.reviewTop}>
-                  <View style={styles.starsRow}>
-                    {[1, 2, 3, 4, 5].map((estrela) => (
-                      <Feather
-                        key={estrela}
-                        name="star"
-                        size={18}
-                        color={
-                          estrela <= Number(item.nota)
-                            ? "#005386"
-                            : "#D6DEE5"
-                        }
-                        style={estrela < 5 ? styles.starSpacing : undefined}
+                  <View style={styles.reviewAuthorRow}>
+                    {uriFoto ? (
+                      <Image
+                        source={{ uri: uriFoto }}
+                        style={styles.commentAvatar}
                       />
-                    ))}
+                    ) : (
+                      <View style={styles.commentAvatar}>
+                        <Feather name="user" size={16} color="#005386" />
+                      </View>
+                    )}
+                    <Text style={styles.commentAuthor} numberOfLines={1}>
+                      {item.avaliador?.nm_usuario || "Usuário"}
+                    </Text>
                   </View>
 
-                  <Text style={styles.reviewDate}>
-                    {formatarData(item.criado_em)}
-                  </Text>
+                  <Text style={styles.reviewDate}>{formatarData(item.created_at)}</Text>
+                </View>
+
+                <View style={styles.starsRow}>
+                  {[1, 2, 3, 4, 5].map((estrela) => (
+                    <Feather
+                      key={estrela}
+                      name="star"
+                      size={18}
+                      color={estrela <= Number(item.nr_nota) ? "#005386" : "#D6DEE5"}
+                      style={estrela < 5 ? styles.starSpacing : undefined}
+                    />
+                  ))}
                 </View>
 
                 <Text style={styles.reviewScore}>
-                  {item.nota}{" "}
-                  {Number(item.nota) === 1 ? "estrela" : "estrelas"}
+                  {item.nr_nota}{" "}
+                  {Number(item.nr_nota) === 1 ? "estrela" : "estrelas"}
                 </Text>
 
                 <Text style={styles.reviewBaseComment}>
-                  {item.comentario?.trim()
-                    ? item.comentario
-                    : "Avaliação sem comentário."}
+                  {item.ds_comentario?.trim() || "Avaliação sem comentário."}
                 </Text>
-
-                {comentarios.length > 0 ? (
-                  <View style={styles.commentsContainer}>
-                    <Text style={styles.commentsTitle}>
-                      Comentários ({comentarios.length})
-                    </Text>
-
-                    {comentarios.map((comentario) => (
-                      <View
-                        key={comentario.id}
-                        style={styles.commentItem}
-                      >
-                        <View style={styles.commentAvatar}>
-                          <Feather
-                            name="user"
-                            size={16}
-                            color="#005386"
-                          />
-                        </View>
-
-                        <View style={styles.commentContent}>
-                          <View style={styles.commentHeader}>
-                            <Text style={styles.commentAuthor}>
-                              {comentario.autor}
-                            </Text>
-
-                            <Text style={styles.commentDate}>
-                              {formatarData(comentario.criado_em)}
-                            </Text>
-                          </View>
-
-                          <Text style={styles.commentText}>
-                            {comentario.texto}
-                          </Text>
-                        </View>
-                      </View>
-                    ))}
-                  </View>
-                ) : null}
 
                 <TouchableOpacity
                   style={styles.commentAction}
                   activeOpacity={0.75}
-                  onPress={() => abrirComentario(item.storageKey)}
+                  onPress={() => alternarComentarios(item.id_avaliacao)}
                 >
-                  <Feather
-                    name="message-circle"
-                    size={17}
-                    color="#0099FF"
-                  />
-
+                  <Feather name="message-circle" size={17} color="#0099FF" />
                   <Text style={styles.commentActionText}>
-                    {comentarioAberto ? "Cancelar comentário" : "Comentar avaliação"}
+                    {avaliacoesAbertas[item.id_avaliacao]
+                      ? "Ocultar comentários"
+                      : "Ver/comentar avaliação"}
                   </Text>
                 </TouchableOpacity>
 
-                {comentarioAberto ? (
-                  <View style={styles.commentForm}>
-                    <Text style={styles.commentFormLabel}>
-                      Escreva seu comentário
+                {avaliacoesAbertas[item.id_avaliacao] ? (
+                  <View style={styles.commentsContainer}>
+                    <Text style={styles.commentsTitle}>
+                      Comentários ({(comentarios[item.id_avaliacao] || []).length})
                     </Text>
 
-                    <TextInput
-                      style={styles.commentInput}
-                      placeholder="Digite um comentário..."
-                      placeholderTextColor="#999999"
-                      value={textoComentario}
-                      onChangeText={(texto) => {
-                        setTextoComentario(texto);
-                        if (erroComentario) setErroComentario("");
-                      }}
-                      multiline
-                      maxLength={500}
-                      editable={!enviandoComentario}
-                    />
+                    {carregandoComentarios[item.id_avaliacao] ? (
+                      <ActivityIndicator size="small" color="#0099FF" />
+                    ) : (
+                      <>
+                        {(comentarios[item.id_avaliacao] || []).map((comentario) => {
+                          const fotoAutor = urlFotoAutor(comentario.autor?.ds_foto_perfil);
 
-                    <View style={styles.commentFormFooter}>
-                      <Text style={styles.characterCount}>
-                        {textoComentario.length}/500
-                      </Text>
-                    </View>
+                          return (
+                            <View key={comentario.id_comentario} style={styles.commentItem}>
+                              {fotoAutor ? (
+                                <Image source={{ uri: fotoAutor }} style={styles.commentAvatar} />
+                              ) : (
+                                <View style={styles.commentAvatar}>
+                                  <Feather name="user" size={16} color="#005386" />
+                                </View>
+                              )}
+                              <View style={styles.commentContent}>
+                                <View style={styles.commentHeader}>
+                                  <Text style={styles.commentAuthor} numberOfLines={1}>
+                                    {comentario.autor?.nm_usuario || "Usuário"}
+                                  </Text>
+                                  <Text style={styles.commentDate}>
+                                    {formatarData(comentario.created_at)}
+                                  </Text>
+                                </View>
+                                <Text style={styles.commentText}>
+                                  {comentario.ds_comentario}
+                                </Text>
+                              </View>
+                            </View>
+                          );
+                        })}
 
-                    {erroComentario ? (
-                      <View style={styles.commentErrorBox}>
-                        <Feather
-                          name="alert-circle"
-                          size={16}
-                          color="#D9534F"
-                        />
+                        {(comentarios[item.id_avaliacao] || []).length === 0 ? (
+                          <Text style={styles.noCommentsText}>
+                            Ainda não há comentários nesta avaliação.
+                          </Text>
+                        ) : null}
 
-                        <Text style={styles.commentErrorText}>
-                          {erroComentario}
-                        </Text>
-                      </View>
-                    ) : null}
+                        <View style={styles.commentForm}>
+                          <Text style={styles.commentFormLabel}>
+                            Escreva seu comentário
+                          </Text>
+                          <TextInput
+                            style={styles.commentInput}
+                            placeholder="Digite um comentário..."
+                            placeholderTextColor="#999999"
+                            value={comentariosRascunho[item.id_avaliacao] || ""}
+                            onChangeText={(texto) => {
+                              setComentariosRascunho((current) => ({
+                                ...current,
+                                [item.id_avaliacao]: texto,
+                              }));
+                              if (errosComentario[item.id_avaliacao]) {
+                                setErrosComentario((current) => ({
+                                  ...current,
+                                  [item.id_avaliacao]: "",
+                                }));
+                              }
+                            }}
+                            multiline
+                            maxLength={500}
+                            editable={!enviandoComentario[item.id_avaliacao]}
+                          />
+                          <View style={styles.commentFormFooter}>
+                            <Text style={styles.characterCount}>
+                              {(comentariosRascunho[item.id_avaliacao] || "").length}/500
+                            </Text>
+                          </View>
 
-                    <TouchableOpacity
-                      style={[
-                        styles.sendCommentButton,
-                        enviandoComentario && styles.buttonDisabled,
-                      ]}
-                      activeOpacity={0.8}
-                      onPress={() => enviarComentario(item)}
-                      disabled={enviandoComentario}
-                    >
-                      {enviandoComentario ? (
-                        <ActivityIndicator
-                          size="small"
-                          color="#FFFFFF"
-                        />
-                      ) : (
-                        <Feather
-                          name="send"
-                          size={17}
-                          color="#FFFFFF"
-                        />
-                      )}
+                          {errosComentario[item.id_avaliacao] ? (
+                            <View style={styles.commentErrorBox}>
+                              <Feather name="alert-circle" size={16} color="#D9534F" />
+                              <Text style={styles.commentErrorText}>
+                                {errosComentario[item.id_avaliacao]}
+                              </Text>
+                            </View>
+                          ) : null}
 
-                      <Text style={styles.sendCommentButtonText}>
-                        {enviandoComentario
-                          ? "Enviando..."
-                          : "Publicar comentário"}
-                      </Text>
-                    </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[
+                              styles.sendCommentButton,
+                              (!comentariosRascunho[item.id_avaliacao]?.trim() ||
+                                enviandoComentario[item.id_avaliacao]) && styles.buttonDisabled,
+                            ]}
+                            activeOpacity={0.8}
+                            onPress={() => void enviarComentario(item.id_avaliacao)}
+                            disabled={
+                              !comentariosRascunho[item.id_avaliacao]?.trim() ||
+                              Boolean(enviandoComentario[item.id_avaliacao])
+                            }
+                          >
+                            {enviandoComentario[item.id_avaliacao] ? (
+                              <ActivityIndicator size="small" color="#FFFFFF" />
+                            ) : (
+                              <Feather name="send" size={17} color="#FFFFFF" />
+                            )}
+                            <Text style={styles.sendCommentButtonText}>
+                              {enviandoComentario[item.id_avaliacao]
+                                ? "Enviando..."
+                                : "Publicar comentário"}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      </>
+                    )}
                   </View>
                 ) : null}
               </View>
@@ -631,6 +593,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: 10,
+  },
+
+  reviewAuthorRow: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
   },
 
   starsRow: {
