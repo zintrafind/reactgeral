@@ -21,12 +21,16 @@ export default function EditarPerfil() {
   const [idUsuario, setIdUsuario] = useState<number | null>(null);
   const [nome, setNome] = useState("");
   const [descricao, setDescricao] = useState("");
+  const [localizacao, setLocalizacao] = useState("");
+
   const [fotoPerfil, setFotoPerfil] =
     useState<ImagePicker.ImagePickerAsset | null>(null);
   const [banner, setBanner] =
     useState<ImagePicker.ImagePickerAsset | null>(null);
+
   const [fotoPerfilAntiga, setFotoPerfilAntiga] = useState<string | null>(null);
   const [bannerAntigo, setBannerAntigo] = useState<string | null>(null);
+
   const [modalResultado, setModalResultado] = useState(false);
   const [tipoModal, setTipoModal] = useState<"sucesso" | "erro">("sucesso");
   const [mensagemModal, setMensagemModal] = useState("");
@@ -72,6 +76,7 @@ export default function EditarPerfil() {
       setIdUsuario(Number(usuario.id_usuario));
       setNome(usuario.nm_usuario ?? "");
       setDescricao(usuario.ds_usuario ?? "");
+      setLocalizacao(usuario.ds_localizacao ?? "");
 
       if (usuario.ds_foto_perfil) {
         setFotoPerfilAntiga(getImageUrl(usuario.ds_foto_perfil));
@@ -162,7 +167,6 @@ export default function EditarPerfil() {
     const nomeArquivo = imagem.fileName || nomePadrao;
 
     if (Platform.OS === "web") {
-      // No navegador, envie os bytes da imagem, não o objeto { uri, name, type }.
       const resposta = await fetch(imagem.uri);
 
       if (!resposta.ok) {
@@ -172,7 +176,6 @@ export default function EditarPerfil() {
       const arquivo = await resposta.blob();
       formData.append(campo, arquivo, nomeArquivo);
     } else {
-      // Android e iOS usam o formato de arquivo do React Native.
       formData.append(campo, {
         uri: imagem.uri,
         name: nomeArquivo,
@@ -196,6 +199,7 @@ export default function EditarPerfil() {
 
       formData.append("nm_usuario", nome);
       formData.append("ds_usuario", descricao);
+      formData.append("ds_localizacao", localizacao.trim());
 
       if (fotoPerfil) {
         await adicionarImagem(
@@ -222,6 +226,7 @@ export default function EditarPerfil() {
       console.log("ID:", idUsuario);
       console.log("Nome:", nome);
       console.log("Descrição:", descricao);
+      console.log("Localização:", localizacao);
       console.log("Foto:", fotoPerfil?.uri);
       console.log("Banner:", banner?.uri);
       console.log("=================================");
@@ -264,22 +269,20 @@ export default function EditarPerfil() {
         id_usuario: idUsuario,
         nm_usuario: nome,
         ds_usuario: descricao,
+        ds_localizacao: localizacao.trim(),
       };
 
       if (usuarioFinal.ds_foto_perfil) {
-        setFotoPerfilAntiga(
-          getImageUrl(usuarioFinal.ds_foto_perfil)
-        );
+        setFotoPerfilAntiga(getImageUrl(usuarioFinal.ds_foto_perfil));
       }
 
       if (usuarioFinal.ds_banner) {
-        setBannerAntigo(
-          getImageUrl(usuarioFinal.ds_banner)
-        );
+        setBannerAntigo(getImageUrl(usuarioFinal.ds_banner));
       }
 
       setNome(usuarioFinal.nm_usuario ?? nome);
       setDescricao(usuarioFinal.ds_usuario ?? descricao);
+      setLocalizacao(usuarioFinal.ds_localizacao ?? localizacao);
 
       await AsyncStorage.setItem(
         "usuario",
@@ -309,17 +312,12 @@ export default function EditarPerfil() {
           "Sua sessão expirou. Faça login novamente."
         );
       } else if (erro?.response?.status === 404) {
-        setMensagemModal(
-          "Usuário não encontrado."
-        );
+        setMensagemModal("Usuário não encontrado.");
       } else if (erro?.response?.status === 422) {
-        const errosValidacao =
-          erro?.response?.data?.errors;
+        const errosValidacao = erro?.response?.data?.errors;
 
         if (errosValidacao) {
-          const mensagens = Object.values(
-            errosValidacao
-          )
+          const mensagens = Object.values(errosValidacao)
             .flat()
             .join("\n");
 
@@ -359,16 +357,10 @@ export default function EditarPerfil() {
           onPress={() => router.replace("/perfil")}
           style={styles.back}
         >
-          <AntDesign
-            name="left"
-            size={22}
-            color="#005386"
-          />
+          <AntDesign name="left" size={22} color="#005386" />
         </TouchableOpacity>
 
-        <Text style={styles.titulo}>
-          Editar Perfil
-        </Text>
+        <Text style={styles.titulo}>Editar Perfil</Text>
 
         <TouchableOpacity
           style={styles.foto}
@@ -453,6 +445,33 @@ export default function EditarPerfil() {
           value={descricao}
           onChangeText={setDescricao}
         />
+
+        {/* LOCALIZAÇÃO DO PERFIL */}
+        <Text style={styles.label}>
+          Localização
+        </Text>
+
+        <View style={styles.localizacaoContainer}>
+          <MaterialIcons
+            name="location-on"
+            size={22}
+            color="#005386"
+          />
+
+          <TextInput
+            style={styles.inputLocalizacao}
+            placeholder="Ex.: Centro, Itanhaém - SP"
+            placeholderTextColor="#777"
+            value={localizacao}
+            onChangeText={setLocalizacao}
+            maxLength={255}
+            returnKeyType="done"
+          />
+        </View>
+
+        <Text style={styles.dicaLocalizacao}>
+          Informe seu bairro e cidade para facilitar as trocas.
+        </Text>
 
         <TouchableOpacity
           style={styles.botao}
@@ -607,6 +626,31 @@ const styles = StyleSheet.create({
     marginBottom: 18,
     textAlignVertical: "top",
     color: "#333333",
+    fontFamily: "Montserrat_400Regular",
+  },
+  localizacaoContainer: {
+    minHeight: 50,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 25,
+    borderWidth: 1,
+    borderColor: "#0099FF",
+    paddingHorizontal: 15,
+    marginBottom: 6,
+  },
+  inputLocalizacao: {
+    flex: 1,
+    height: 48,
+    paddingHorizontal: 10,
+    color: "#333333",
+    fontFamily: "Montserrat_400Regular",
+  },
+  dicaLocalizacao: {
+    color: "#777777",
+    fontSize: 12,
+    marginBottom: 18,
+    marginLeft: 5,
     fontFamily: "Montserrat_400Regular",
   },
   botao: {
